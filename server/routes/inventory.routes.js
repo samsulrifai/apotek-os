@@ -1,0 +1,253 @@
+const express = require('express');
+const router = express.Router();
+const { v4: uuidv4 } = require('uuid');
+const { getDb } = require('../db/database');
+const { verifyToken } = require('../middleware/auth');
+
+// GET /api/inventory/stock — products with total stock
+router.get('/stock', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const { search, category_id, stock_status, page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const params = [];
+    const conditions = ['p.is_active = 1'];
+
+    if (search) {
+      conditions.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)');
+      const s = `%${search}%`;
+      params.push(s, s, s);
+    }
+
+    if (category_id) {
+      conditions.push('p.category_id = ?');
+      params.push(category_id);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    let havingClause = '';
+    if (stock_status === 'low') {
+      havingClause = 'HAVING total_stock < p.min_stock AND p.min_stock > 0';
+    } else if (stock_status === 'out') {
+      havingClause = 'HAVING total_stock = 0';
+    } else if (stock_status === 'normal') {
+      havingClause = 'HAVING total_stock >= p.min_stock OR p.min_stock = 0';
+    }
+
+    const total = db.prepare(`
+      SELECT COUNT(*) as count FROM (
+        SELECT p.id, COALESCE(SUM(pb.qty_on_hand), 0) as total_stock
+        FROM products p
+        LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
+        ${whereClause}
+        GROUP BY p.id
+        ${havingClause}
+      )
+    `).get(...params);
+
+    const items = db.prepare(`
+      SELECT p.id, p.sku, p.name, p.generic_name, p.min_stock, p.selling_price, p.default_purchase_price,
+             c.name as category_name, u.name as unit_name,
+             COALESCE(SUM(pb.qty_on_hand), 0) as total_stock,
+             COUNT(pb.id) as batch_count
+      FROM products p
+      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN units u ON u.id = p.unit_id
+      LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
+      ${whereClause}
+      GROUP BY p.id
+      ${havingClause}
+      ORDER BY p.name ASC
+      LIMIT ? OFFSET ?
+    `).all(...params, parseInt(limit), offset);
+
+    res.json({
+      data: items,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: total.count,
+        totalPages: Math.ceil(total.count / parseInt(limit))
+      }
+    });
+  } catch (err) {
+    console.error('Inventory stock error:', err);
+    res.status(500).json({ error: 'Gagal memuat data stok.' });
+  }
+});
+
+// GET /api/inventory/stats
+router.get('/stats', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+
+    const totalItems = db.prepare(`
+      SELECT COALESCE(SUM(pb.qty_on_hand), 0) as count
+      FROM product_batches pb
+      JOIN products p ON p.id = pb.product_id
+      WHERE pb.status = 'active' AND p.is_active = 1
+    `).get();
+
+    const totalValue = db.prepare(`
+      SELECT COALESCE(SUM(pb.qty_on_hand * pb.purchase_price), 0) as value
+      FROM product_batches pb
+      JOIN products p ON p.id = pb.product_id
+      WHERE pb.status = 'active' AND p.is_active = 1
+    `).get();
+
+    const criticalStock = db.prepare(`
+      SELECT COUNT(*) as count FROM (
+        SELECT p.id FROM products p
+        LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
+        WHERE p.is_active = 1 AND p.min_stock > 0
+        GROUP BY p.id
+        HAVING COALESCE(SUM(pb.qty_on_hand), 0) < p.min_stock
+      )
+    `).get();
+
+    const expiringCount = db.prepare(`
+      SELECT COUNT(*) as count FROM product_batches pb
+      JOIN products p ON p.id = pb.product_id
+      WHERE pb.status = 'active' AND pb.qty_on_hand > 0
+        AND pb.expiry_date IS NOT NULL
+        AND DATE(pb.expiry_date) <= DATE('now', '+90 days')
+        AND DATE(pb.expiry_date) >= DATE('now')
+        AND p.is_active = 1
+    `).get();
+
+    res.json({
+      totalItems: totalItems.count,
+      totalValue: totalValue.value,
+      criticalStock: criticalStock.count,
+      expiringCount: expiringCount.count
+    });
+  } catch (err) {
+    console.error('Inventory stats error:', err);
+    res.status(500).json({ error: 'Gagal memuat statistik inventaris.' });
+  }
+});
+
+// GET /api/inventory/expiring
+router.get('/expiring', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const days = parseInt(req.query.days) || 90;
+
+    const batches = db.prepare(`
+      SELECT pb.*, p.name as product_name, p.sku, p.generic_name,
+             u.name as unit_name
+      FROM product_batches pb
+      JOIN products p ON p.id = pb.product_id
+      LEFT JOIN units u ON u.id = p.unit_id
+      WHERE pb.status = 'active' AND pb.qty_on_hand > 0
+        AND pb.expiry_date IS NOT NULL
+        AND DATE(pb.expiry_date) <= DATE('now', '+' || ? || ' days')
+        AND DATE(pb.expiry_date) >= DATE('now')
+        AND p.is_active = 1
+      ORDER BY pb.expiry_date ASC
+    `).all(days);
+
+    res.json(batches);
+  } catch (err) {
+    console.error('Expiring batches error:', err);
+    res.status(500).json({ error: 'Gagal memuat data batch kadaluarsa.' });
+  }
+});
+
+// POST /api/inventory/adjust
+router.post('/adjust', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const { reason, notes, items } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Items penyesuaian harus diisi.' });
+    }
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Alasan penyesuaian harus diisi.' });
+    }
+
+    const adjustmentId = uuidv4();
+    const now = new Date().toISOString();
+
+    // Generate adjustment number
+    const count = db.prepare('SELECT COUNT(*) as count FROM stock_adjustments').get();
+    const adjNumber = `ADJ-${now.split('T')[0].replace(/-/g, '')}-${String(count.count + 1).padStart(4, '0')}`;
+
+    const insertAdjustment = db.prepare(`
+      INSERT INTO stock_adjustments (id, adjustment_number, reason, notes, status, created_by, created_at)
+      VALUES (?, ?, ?, ?, 'completed', ?, ?)
+    `);
+
+    const insertItem = db.prepare(`
+      INSERT INTO stock_adjustment_items (id, stock_adjustment_id, product_id, product_batch_id, qty_before, qty_after, qty_difference)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const updateBatch = db.prepare('UPDATE product_batches SET qty_on_hand = ?, updated_at = ? WHERE id = ?');
+
+    const insertMovement = db.prepare(`
+      INSERT INTO stock_movements (id, product_id, product_batch_id, movement_type, reference_type, reference_id, qty_in, qty_out, unit_cost, notes, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const transaction = db.transaction(() => {
+      insertAdjustment.run(adjustmentId, adjNumber, reason, notes || null, req.user.id, now);
+
+      for (const item of items) {
+        const { product_id, product_batch_id, qty_after } = item;
+
+        if (!product_id || qty_after === undefined) {
+          throw new Error('product_id dan qty_after harus diisi untuk setiap item.');
+        }
+
+        let batch = null;
+        let qtyBefore = 0;
+
+        if (product_batch_id) {
+          batch = db.prepare('SELECT * FROM product_batches WHERE id = ?').get(product_batch_id);
+          if (!batch) throw new Error(`Batch ${product_batch_id} tidak ditemukan.`);
+          qtyBefore = batch.qty_on_hand;
+        }
+
+        const qtyDiff = qty_after - qtyBefore;
+        const itemId = uuidv4();
+
+        insertItem.run(itemId, adjustmentId, product_id, product_batch_id || null, qtyBefore, qty_after, qtyDiff);
+
+        if (product_batch_id && batch) {
+          updateBatch.run(qty_after, now, product_batch_id);
+        }
+
+        // Create stock movement
+        const movementId = uuidv4();
+        const qtyIn = qtyDiff > 0 ? qtyDiff : 0;
+        const qtyOut = qtyDiff < 0 ? Math.abs(qtyDiff) : 0;
+
+        insertMovement.run(
+          movementId, product_id, product_batch_id || null,
+          'adjustment', 'stock_adjustment', adjustmentId,
+          qtyIn, qtyOut,
+          batch ? batch.purchase_price : 0,
+          `Penyesuaian stok: ${reason}`,
+          req.user.id, now
+        );
+      }
+    });
+
+    transaction();
+
+    res.status(201).json({
+      id: adjustmentId,
+      adjustment_number: adjNumber,
+      message: 'Penyesuaian stok berhasil.'
+    });
+  } catch (err) {
+    console.error('Stock adjustment error:', err);
+    res.status(500).json({ error: err.message || 'Gagal melakukan penyesuaian stok.' });
+  }
+});
+
+module.exports = router;
