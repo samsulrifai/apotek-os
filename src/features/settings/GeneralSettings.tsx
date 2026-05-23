@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { api } from "@/lib/api"
 import type { AppSettings } from "@/types"
+import { useToast } from "@/hooks/use-toast"
 
 export default function GeneralSettings() {
   const [settings, setSettings] = useState<AppSettings>({
@@ -16,6 +17,7 @@ export default function GeneralSettings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
+  const { toast } = useToast()
 
   useEffect(() => {
     api.get<AppSettings>('/settings')
@@ -30,7 +32,9 @@ export default function GeneralSettings() {
       await api.put('/settings', settings)
       setIsSaved(true)
       setTimeout(() => setIsSaved(false), 3000)
-    } catch { /* handle */ }
+    } catch {
+      toast({ title: "Gagal Menyimpan", description: "Terjadi kesalahan saat menyimpan pengaturan. Silakan coba lagi.", variant: "destructive" })
+    }
     finally { setSaving(false) }
   }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { Sliders, Plus, Search, Loader2, Save, AlertCircle } from "lucide-react"
+import { Sliders, Plus, Search, Loader2, Save, AlertCircle, X, Package } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -8,11 +8,12 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SearchableSelect } from "@/components/ui/SearchableSelect"
 import { api } from "@/lib/api"
 import type { StockAdjustment, Product } from "@/types"
 import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
-import { DataTableColumnHeader } from "@/components/ui/DataTableColumnHeader"
+import { useToast } from "@/hooks/use-toast"
 
 export default function Adjustments() {
   const [adjustments, setAdjustments] = useState<StockAdjustment[]>([])
@@ -20,6 +21,7 @@ export default function Adjustments() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const { toast } = useToast()
 
   const [form, setForm] = useState({
     reason: '',
@@ -46,13 +48,16 @@ export default function Adjustments() {
     setForm(f => ({ ...f, items: [...f.items, { product_id: '', qty_before: 0, qty_after: 0 }] }))
   }
 
+  const removeItem = (idx: number) => {
+    setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))
+  }
+
   const updateItem = (idx: number, field: string, value: string | number) => {
     setForm(f => ({
       ...f,
       items: f.items.map((item, i) => {
         if (i !== idx) return item
         const updated = { ...item, [field]: value }
-        // Auto-fill qty_before when product selected
         if (field === 'product_id') {
           const prod = products.find(p => p.id === value)
           updated.qty_before = prod?.total_stock ?? 0
@@ -75,8 +80,11 @@ export default function Adjustments() {
         })),
       })
       setDialogOpen(false)
+      toast({ title: "Berhasil", description: "Penyesuaian stok berhasil disimpan." })
       loadData()
-    } catch { /* handle */ }
+    } catch {
+      toast({ title: "Gagal", description: "Gagal menyimpan penyesuaian stok.", variant: "destructive" })
+    }
     finally { setSaving(false) }
   }
 
@@ -97,11 +105,8 @@ export default function Adjustments() {
     itemsPerPage,
     setItemsPerPage,
     totalItems,
-    setFilter,
-    getFilter,
     globalSearch,
     setGlobalSearch,
-    columnFilters
   } = useTablePagination(adjustments)
 
   if (loading) {
@@ -144,18 +149,18 @@ export default function Adjustments() {
           <Table>
             <TableHeader className="bg-slate-50/80">
               <TableRow className="hover:bg-transparent">
-                <DataTableColumnHeader title="No. Penyesuaian" filterValue={getFilter('adjustment_number')} onFilterChange={v => setFilter('adjustment_number', v)} />
-                <DataTableColumnHeader title="Alasan" filterValue={getFilter('reason')} onFilterChange={v => setFilter('reason', v)} />
-                <DataTableColumnHeader title="Dibuat Oleh" filterValue={getFilter('created_by_name')} onFilterChange={v => setFilter('created_by_name', v)} />
-                <DataTableColumnHeader title="Tanggal" hideFilter />
-                <DataTableColumnHeader title="Status" hideFilter align="center" />
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">No. Penyesuaian</span></TableHead>
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Alasan</span></TableHead>
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Dibuat Oleh</span></TableHead>
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Tanggal</span></TableHead>
+                <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Status</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-slate-400">
-                    {globalSearch || Object.values(columnFilters).some(Boolean) ? 'Tidak ada hasil pencarian' : 'Belum ada penyesuaian stok'}
+                  <TableCell colSpan={5} className="text-center py-12 text-slate-400">
+                    {globalSearch ? 'Tidak ada hasil pencarian' : 'Belum ada penyesuaian stok'}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -184,26 +189,36 @@ export default function Adjustments() {
         />
       </Card>
 
+      {/* Create Adjustment Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-xl text-slate-800 flex items-center">
-              <Sliders className="mr-2 h-5 w-5 text-teal-600" />
-              Buat Penyesuaian Stok
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="text-sm text-amber-800 font-medium">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col p-0 gap-0">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+            <DialogHeader>
+              <DialogTitle className="text-xl text-slate-800 flex items-center">
+                <div className="h-9 w-9 rounded-lg bg-teal-100 flex items-center justify-center mr-3">
+                  <Sliders className="h-5 w-5 text-teal-600" />
+                </div>
+                Buat Penyesuaian Stok
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+            {/* Warning */}
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3.5 flex items-start gap-3">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-amber-800">
                 Penyesuaian stok akan mengubah jumlah inventori secara langsung. Pastikan alasan dan catatan sudah benar.
-              </div>
+              </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/* Reason & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label className="text-slate-700 font-semibold text-sm">Alasan Penyesuaian *</Label>
-                <Select value={form.reason || undefined} onValueChange={(val) => updateForm('reason', val)}>
+                <Label className="text-slate-700 font-semibold text-sm">Alasan Penyesuaian <span className="text-rose-500">*</span></Label>
+                <Select value={form.reason || undefined} onValueChange={(val) => setForm({...form, reason: val})}>
                   <SelectTrigger className="mt-1.5"><SelectValue placeholder="Pilih alasan" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="stock_opname">Stok Opname</SelectItem>
@@ -221,44 +236,85 @@ export default function Adjustments() {
               </div>
             </div>
 
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 flex justify-between items-center">
-                <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wider">Item Penyesuaian</h3>
-                <Button size="sm" variant="outline" onClick={addItem} className="h-7 text-xs"><Plus className="h-3 w-3 mr-1" /> Tambah</Button>
+            {/* Items */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Package className="h-4 w-4 text-teal-600" />
+                  <h3 className="font-bold text-slate-700 text-sm">Item Penyesuaian</h3>
+                  <Badge variant="outline" className="ml-1 text-xs bg-slate-50 text-slate-500 border-slate-200">{form.items.length} item</Badge>
+                </div>
+                <Button size="sm" variant="outline" onClick={addItem} className="h-8 text-xs border-teal-200 text-teal-700 hover:bg-teal-50">
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Tambah
+                </Button>
               </div>
-              <div className="p-4 space-y-3">
-                {form.items.map((item, idx) => (
-                  <div key={idx} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-5">
-                      <Label className="text-xs text-slate-500">Produk</Label>
-                      <Select value={item.product_id} onValueChange={(val) => updateItem(idx, 'product_id', val)}>
-                        <SelectTrigger className="mt-1"><SelectValue placeholder="Pilih produk" /></SelectTrigger>
-                        <SelectContent>
-                          {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} (Stok: {p.total_stock ?? 0})</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="col-span-2">
-                      <Label className="text-xs text-slate-500">Stok Saat Ini</Label>
-                      <Input type="number" value={item.qty_before} disabled className="mt-1 bg-slate-50" />
-                    </div>
-                    <div className="col-span-3">
-                      <Label className="text-xs text-slate-500">Stok Sebenarnya</Label>
-                      <Input type="number" value={item.qty_after} onChange={e => updateItem(idx, 'qty_after', parseInt(e.target.value) || 0)} className="mt-1" min={0} />
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <Label className="text-xs text-slate-500">Selisih</Label>
-                      <div className={`mt-1 text-sm font-bold py-2 ${item.qty_after - item.qty_before >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {item.qty_after - item.qty_before > 0 ? '+' : ''}{item.qty_after - item.qty_before}
+
+              <div className="space-y-3">
+                {form.items.map((item, idx) => {
+                  const selectedProduct = products.find(p => p.id === item.product_id)
+                  const diff = item.qty_after - item.qty_before
+                  return (
+                    <div key={idx} className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+                      {/* Item Header */}
+                      <div className="flex items-center justify-between px-4 py-2 bg-slate-50/80 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <div className="h-5 w-5 rounded-full bg-teal-100 flex items-center justify-center">
+                            <span className="text-[10px] font-bold text-teal-700">{idx + 1}</span>
+                          </div>
+                          <span className="text-xs font-semibold text-slate-500">
+                            {selectedProduct ? selectedProduct.name : 'Produk belum dipilih'}
+                          </span>
+                        </div>
+                        {form.items.length > 1 && (
+                          <Button type="button" size="icon" variant="ghost" onClick={() => removeItem(idx)} className="h-6 w-6 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full">
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Item Body */}
+                      <div className="p-4 space-y-3">
+                        <div>
+                          <Label className="text-xs text-slate-500 font-medium">Pilih Produk <span className="text-rose-500">*</span></Label>
+                          <SearchableSelect
+                            options={products.map(p => ({ value: p.id, label: p.name, sublabel: `Stok saat ini: ${p.total_stock ?? 0}` }))}
+                            value={item.product_id}
+                            onValueChange={v => updateItem(idx, 'product_id', v)}
+                            placeholder="Ketik untuk cari produk..."
+                            searchPlaceholder="Cari nama produk..."
+                            emptyMessage="Produk tidak ditemukan"
+                            className="mt-1"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <Label className="text-xs text-slate-500 font-medium">Stok Saat Ini</Label>
+                            <Input type="number" value={item.qty_before} disabled className="mt-1 bg-slate-50 text-slate-500" />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-slate-500 font-medium">Stok Sebenarnya</Label>
+                            <Input type="number" value={item.qty_after} onChange={e => updateItem(idx, 'qty_after', parseInt(e.target.value) || 0)} className="mt-1" min={0} />
+                          </div>
+                          <div className="flex flex-col items-center">
+                            <Label className="text-xs text-slate-500 font-medium">Selisih</Label>
+                            <div className={`mt-1 h-9 flex items-center justify-center rounded-lg px-3 text-sm font-bold ${
+                              diff > 0 ? 'bg-emerald-50 text-emerald-700' : diff < 0 ? 'bg-rose-50 text-rose-700' : 'bg-slate-50 text-slate-500'
+                            }`}>
+                              {diff > 0 ? '+' : ''}{diff}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           </div>
+
+          {/* Footer */}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
             <Button onClick={handleSave} disabled={saving || !form.reason || form.items.some(i => !i.product_id)} className="bg-teal-600 hover:bg-teal-700">
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Simpan Penyesuaian

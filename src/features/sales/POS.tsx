@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { api } from "@/lib/api"
 import { useAuth } from "@/app/providers/AuthProvider"
 import type { Product, CartItem, CreateSalePayload, Category } from "@/types"
+import { useToast } from "@/hooks/use-toast"
 
 export default function POS() {
   const { user } = useAuth()
@@ -22,6 +23,7 @@ export default function POS() {
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>("")
   const [popularProducts, setPopularProducts] = useState<Product[]>([])
+  const { toast } = useToast()
 
   // Load categories and popular products on mount
   useEffect(() => {
@@ -144,7 +146,10 @@ export default function POS() {
   const setExactAmount = () => setPaidAmount(total.toLocaleString('id-ID'))
   const setQuickAmount = (amount: number) => setPaidAmount(amount.toLocaleString('id-ID'))
 
-  const displayProducts = searchResults.length > 0 ? searchResults : popularProducts
+  const filteredProducts = selectedCategory
+    ? (searchResults.length > 0 ? searchResults : popularProducts).filter(p => p.category_id === selectedCategory)
+    : (searchResults.length > 0 ? searchResults : popularProducts)
+  const displayProducts = filteredProducts
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-[calc(100vh-8rem)] animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -190,7 +195,7 @@ export default function POS() {
                   />
                   {searching && <Loader2 className="absolute right-3 top-3 h-5 w-5 text-teal-500 animate-spin" />}
                 </div>
-                <Button className="h-11 px-4 rounded-xl shadow-sm bg-slate-800 hover:bg-slate-700">
+                <Button className="h-11 px-4 rounded-xl shadow-sm bg-slate-800 hover:bg-slate-700" onClick={() => toast({ title: "Segera Hadir", description: "Fitur scan barcode masih dalam tahap pengembangan." })}>
                   <ScanBarcode className="mr-2 h-5 w-5" /> Scan
                 </Button>
               </div>

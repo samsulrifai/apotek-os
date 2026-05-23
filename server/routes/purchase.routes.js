@@ -385,6 +385,7 @@ router.get('/invoices', verifyToken, (req, res) => {
     const db = getDb();
     const invoices = db.prepare(`
       SELECT po.id, po.po_number, po.order_date, po.status, po.total_amount,
+             po.payment_status, po.due_date, po.paid_at,
              s.name as supplier_name,
              gr.receipt_number, gr.received_date
       FROM purchase_orders po
@@ -394,7 +395,25 @@ router.get('/invoices', verifyToken, (req, res) => {
       ORDER BY po.created_at DESC
     `).all();
 
-    res.json(invoices);
+    // Compute effective payment_status
+    const now = new Date();
+    const result = invoices.map(inv => {
+      let paymentStatus = inv.payment_status || 'unpaid';
+      const dueDate = inv.due_date || (inv.received_date ? new Date(new Date(inv.received_date).getTime() + 30*24*60*60*1000).toISOString().split('T')[0] : null);
+      
+      if (paymentStatus !== 'paid' && dueDate && new Date(dueDate) < now) {
+        paymentStatus = 'overdue';
+      }
+      
+      return {
+        ...inv,
+        payment_status: paymentStatus,
+        due_date: dueDate,
+        received_date: inv.received_date || inv.order_date,
+      };
+    });
+
+    res.json(result);
   } catch (err) {
     console.error('List invoices error:', err);
     res.status(500).json({ error: 'Gagal memuat daftar faktur.' });
@@ -406,30 +425,62 @@ router.get('/invoices/stats', verifyToken, (req, res) => {
   try {
     const db = getDb();
 
-    const totalPayable = db.prepare(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM purchase_orders WHERE status IN ('completed', 'partial', 'approved', 'ordered')
-    `).get();
+    const allInvoices = db.prepare(`
+      SELECT po.total_amount, po.payment_status, po.due_date, po.paid_at, po.order_date,
+             gr.received_date
+      FROM purchase_orders po
+      LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+      WHERE po.status IN ('completed', 'partial')
+    `).all();
 
-    const paid = db.prepare(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM purchase_orders WHERE status = 'completed'
-    `).get();
+    const now = new Date();
+    const thisMonth = now.toISOString().slice(0, 7); // YYYY-MM
+    
+    let totalDebt = 0;
+    let unpaidCount = 0;
+    let overdueCount = 0;
+    let paidThisMonth = 0;
 
-    const unpaid = db.prepare(`
-      SELECT COALESCE(SUM(total_amount), 0) as total
-      FROM purchase_orders WHERE status IN ('partial', 'approved', 'ordered')
-    `).get();
+    for (const inv of allInvoices) {
+      const status = inv.payment_status || 'unpaid';
+      const dueDate = inv.due_date || (inv.received_date ? new Date(new Date(inv.received_date).getTime() + 30*24*60*60*1000).toISOString().split('T')[0] : null);
 
-    res.json({
-      totalPayable: totalPayable.total,
-      overdue: 0,
-      paid: paid.total,
-      unpaid: unpaid.total
-    });
+      if (status === 'paid') {
+        if (inv.paid_at && inv.paid_at.slice(0, 7) === thisMonth) {
+          paidThisMonth += inv.total_amount || 0;
+        }
+      } else {
+        totalDebt += inv.total_amount || 0;
+        unpaidCount++;
+        if (dueDate && new Date(dueDate) < now) {
+          overdueCount++;
+        }
+      }
+    }
+
+    res.json({ totalDebt, unpaidCount, overdueCount, paidThisMonth });
   } catch (err) {
     console.error('Invoice stats error:', err);
     res.status(500).json({ error: 'Gagal memuat statistik faktur.' });
+  }
+});
+
+// PUT /api/invoices/:id/pay — mark invoice as paid
+router.put('/invoices/:id/pay', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(req.params.id);
+    if (!po) {
+      return res.status(404).json({ error: 'Faktur tidak ditemukan.' });
+    }
+    const now = new Date().toISOString();
+    db.prepare('UPDATE purchase_orders SET payment_status = ?, paid_at = ?, updated_at = ? WHERE id = ?')
+      .run('paid', now, now, req.params.id);
+    
+    res.json({ message: 'Faktur berhasil ditandai lunas.' });
+  } catch (err) {
+    console.error('Pay invoice error:', err);
+    res.status(500).json({ error: 'Gagal memproses pembayaran.' });
   }
 });
 

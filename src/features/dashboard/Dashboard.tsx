@@ -16,11 +16,12 @@ export default function Dashboard() {
   const { user } = useAuth()
   const [data, setData] = useState<DashboardSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     api.get<DashboardSummary>('/dashboard/summary')
       .then(setData)
-      .catch(() => {})
+      .catch(() => setError('Gagal memuat data dashboard. Silakan refresh halaman.'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -47,6 +48,11 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-8">
+      {error && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 font-medium text-sm">
+          {error}
+        </div>
+      )}
       {/* Hero Section */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-6 rounded-2xl bg-white border border-slate-100 shadow-sm relative overflow-hidden">
         <div className="relative z-10">

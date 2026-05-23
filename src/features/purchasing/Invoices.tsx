@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react"
-import { FileText, Receipt, CheckCircle2, Clock, AlertCircle, Search, Download, Eye, Check, Loader2 } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { Receipt, CheckCircle2, Clock, AlertCircle, Search, Download, Check, Loader2, FileText } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -7,6 +7,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { api } from "@/lib/api"
 import type { Invoice } from "@/types"
+import { useToast } from "@/hooks/use-toast"
+import { useTablePagination } from "@/hooks/useTablePagination"
+import { DataTablePagination } from "@/components/ui/DataTablePagination"
 
 interface InvoiceStats {
   totalDebt: number
@@ -15,20 +18,13 @@ interface InvoiceStats {
   paidThisMonth: number
 }
 
-import { useTablePagination } from "@/hooks/useTablePagination"
-import { DataTablePagination } from "@/components/ui/DataTablePagination"
-import { DataTableColumnHeader } from "@/components/ui/DataTableColumnHeader"
-
 export default function Invoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [stats, setStats] = useState<InvoiceStats>({ totalDebt: 0, unpaidCount: 0, overdueCount: 0, paidThisMonth: 0 })
   const [loading, setLoading] = useState(true)
+  const { toast } = useToast()
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     try {
       const [invoicesRes, statsRes] = await Promise.all([
@@ -39,13 +35,18 @@ export default function Invoices() {
       setStats(statsRes)
     } catch { /* silently */ }
     finally { setLoading(false) }
-  }
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
 
   const handlePay = async (id: string) => {
     try {
       await api.put(`/invoices/${id}/pay`)
+      toast({ title: "Berhasil", description: "Faktur berhasil ditandai lunas." })
       loadData()
-    } catch { /* handle */ }
+    } catch {
+      toast({ title: "Gagal", description: "Gagal memproses pembayaran.", variant: "destructive" })
+    }
   }
 
   const formatRp = (value: number) => {
@@ -54,13 +55,13 @@ export default function Invoices() {
 
   const getStatusBadge = (status: string) => {
     switch(status) {
-      case "paid": 
+      case "paid":
         return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 shadow-none"><CheckCircle2 className="mr-1 h-3 w-3" /> Lunas</Badge>
-      case "unpaid": 
+      case "unpaid":
         return <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 shadow-none"><Clock className="mr-1 h-3 w-3" /> Belum Lunas</Badge>
-      case "overdue": 
+      case "overdue":
         return <Badge className="bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 animate-pulse shadow-none"><AlertCircle className="mr-1 h-3 w-3" /> Jatuh Tempo</Badge>
-      default: 
+      default:
         return <Badge variant="outline">{status}</Badge>
     }
   }
@@ -73,11 +74,8 @@ export default function Invoices() {
     itemsPerPage,
     setItemsPerPage,
     totalItems,
-    setFilter,
-    getFilter,
     globalSearch,
     setGlobalSearch,
-    columnFilters
   } = useTablePagination(invoices)
 
   if (loading) {
@@ -103,13 +101,12 @@ export default function Invoices() {
             Kelola tagihan hutang dagang dari Pedagang Besar Farmasi (PBF)
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="shadow-sm bg-white hover:bg-slate-50 text-slate-700">
-            <Download className="mr-2 h-4 w-4" /> Ekspor Rekap
-          </Button>
-        </div>
+        <Button variant="outline" className="shadow-sm bg-white hover:bg-slate-50 text-slate-700" onClick={() => toast({ title: "Segera Hadir", description: "Fitur ekspor rekap faktur masih dalam tahap pengembangan." })}>
+          <Download className="mr-2 h-4 w-4" /> Ekspor Rekap
+        </Button>
       </div>
 
+      {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="shadow-sm border-none bg-white">
           <CardContent className="p-5 flex items-center justify-between">
@@ -157,68 +154,66 @@ export default function Invoices() {
         </Card>
       </div>
 
+      {/* Table */}
       <Card className="shadow-sm overflow-hidden border-none bg-white">
         <CardHeader className="pb-4 border-b border-slate-100 bg-slate-50/50">
-          <div className="flex flex-col sm:flex-row justify-between gap-4">
-            <div className="relative w-full sm:w-[400px]">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <Input type="search" placeholder="Cari No. Faktur, PBF, atau No. SP..." className="pl-9 bg-white border-slate-200 shadow-sm" value={globalSearch} onChange={e => setGlobalSearch(e.target.value)} />
-            </div>
+          <div className="relative w-full sm:w-96">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Input type="search" placeholder="Cari No. Faktur, PBF, atau No. SP..." className="pl-9 bg-white border-slate-200 shadow-sm" value={globalSearch} onChange={e => setGlobalSearch(e.target.value)} />
           </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader className="bg-slate-50/80">
               <TableRow className="hover:bg-transparent">
-                <DataTableColumnHeader title="Informasi Faktur" filterValue={getFilter('po_number')} onFilterChange={v => setFilter('po_number', v)} />
-                <DataTableColumnHeader title="Pemasok (PBF)" filterValue={getFilter('supplier_name')} onFilterChange={v => setFilter('supplier_name', v)} />
-                <DataTableColumnHeader title="Tgl Jatuh Tempo" hideFilter align="center" />
-                <DataTableColumnHeader title="Total Nilai (Inc. PPN)" hideFilter align="right" />
-                <DataTableColumnHeader title="Status" hideFilter align="center" />
-                <DataTableColumnHeader title="Aksi" hideFilter align="right" />
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Informasi Faktur</span></TableHead>
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Pemasok (PBF)</span></TableHead>
+                <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Jatuh Tempo</span></TableHead>
+                <TableHead className="text-right"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Total Nilai</span></TableHead>
+                <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Status</span></TableHead>
+                <TableHead className="text-right"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Aksi</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-slate-400">
-                    {globalSearch || Object.values(columnFilters).some(Boolean) ? 'Tidak ada hasil pencarian' : 'Belum ada faktur'}
+                  <TableCell colSpan={6} className="text-center py-12 text-slate-400">
+                    {globalSearch ? 'Tidak ada hasil pencarian' : 'Belum ada faktur pembelian'}
                   </TableCell>
                 </TableRow>
               ) : (
                 paginatedData.map((inv) => (
-                  <TableRow key={inv.id} className="hover:bg-slate-50 transition-colors">
-                    <TableCell className="align-top pt-4">
-                      <p className="font-bold text-slate-800">{inv.po_number}</p>
+                  <TableRow key={inv.id} className={`hover:bg-slate-50 transition-colors ${inv.payment_status === 'overdue' ? 'bg-rose-50/30' : ''}`}>
+                    <TableCell className="py-3">
+                      <p className="font-bold text-slate-800 font-mono">{inv.po_number}</p>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        Tgl: {new Date(inv.received_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        Tgl: {inv.received_date ? new Date(inv.received_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
                       </p>
                     </TableCell>
-                    <TableCell className="align-top pt-4">
-                      <p className="font-bold text-slate-700 text-sm">{inv.supplier_name}</p>
+                    <TableCell className="py-3">
+                      <p className="font-medium text-slate-700 text-sm">{inv.supplier_name}</p>
                     </TableCell>
-                    <TableCell className="align-top pt-4 text-center">
-                      <span className={`font-semibold ${inv.payment_status === 'overdue' ? 'text-rose-600' : 'text-slate-700'}`}>
+                    <TableCell className="text-center py-3">
+                      <span className={`text-sm font-semibold ${inv.payment_status === 'overdue' ? 'text-rose-600' : 'text-slate-700'}`}>
                         {inv.due_date ? new Date(inv.due_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
                       </span>
                     </TableCell>
-                    <TableCell className="align-top pt-4 text-right">
-                      <span className="font-bold text-slate-800 text-base">{formatRp(inv.total_amount)}</span>
+                    <TableCell className="text-right py-3">
+                      <span className="font-bold text-slate-800">{formatRp(inv.total_amount)}</span>
                     </TableCell>
-                    <TableCell className="align-top pt-4 text-center">
+                    <TableCell className="text-center py-3">
                       {getStatusBadge(inv.payment_status)}
                     </TableCell>
-                    <TableCell className="align-top pt-3 text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" className="h-8 border-slate-200 text-slate-600 hover:text-teal-700 hover:bg-teal-50" title="Lihat Rincian">
-                          <Eye className="h-4 w-4 mr-1.5" /> Detail
+                    <TableCell className="text-right py-3">
+                      {inv.payment_status !== 'paid' ? (
+                        <Button size="sm" className="h-7 text-xs bg-slate-800 hover:bg-slate-700 text-white" onClick={() => handlePay(inv.id)}>
+                          <Check className="h-3.5 w-3.5 mr-1" /> Bayar
                         </Button>
-                        {inv.payment_status !== 'paid' && (
-                          <Button size="sm" className="h-8 bg-slate-800 hover:bg-slate-700 text-white" title="Bayar Tagihan" onClick={() => handlePay(inv.id)}>
-                            <Check className="h-4 w-4 mr-1.5" /> Bayar
-                          </Button>
-                        )}
-                      </div>
+                      ) : (
+                        <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50 text-xs">
+                          <CheckCircle2 className="h-3 w-3 mr-1" /> Lunas
+                        </Badge>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -226,7 +221,7 @@ export default function Invoices() {
             </TableBody>
           </Table>
         </CardContent>
-        <DataTablePagination 
+        <DataTablePagination
           currentPage={currentPage}
           totalPages={totalPages}
           itemsPerPage={itemsPerPage}

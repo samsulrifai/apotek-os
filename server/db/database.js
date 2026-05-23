@@ -194,6 +194,7 @@ async function initializeDatabase() {
       min_stock INTEGER DEFAULT 0,
       default_purchase_price REAL DEFAULT 0,
       selling_price REAL DEFAULT 0,
+      custom_margin REAL DEFAULT NULL,
       is_active INTEGER DEFAULT 1,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
@@ -233,6 +234,9 @@ async function initializeDatabase() {
       tax_amount REAL DEFAULT 0,
       total_amount REAL DEFAULT 0,
       notes TEXT,
+      payment_status TEXT DEFAULT 'unpaid',
+      due_date TEXT,
+      paid_at TEXT,
       created_by TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now')),
@@ -405,6 +409,19 @@ async function initializeDatabase() {
 
   // Save after schema creation
   database._save();
+
+  // Migrations for existing databases
+  const migrations = [
+    'ALTER TABLE products ADD COLUMN custom_margin REAL DEFAULT NULL',
+    'ALTER TABLE purchase_orders ADD COLUMN payment_status TEXT DEFAULT \'unpaid\'',
+    'ALTER TABLE purchase_orders ADD COLUMN due_date TEXT',
+    'ALTER TABLE purchase_orders ADD COLUMN paid_at TEXT',
+  ];
+  for (const sql of migrations) {
+    try { database.exec(sql); } catch (e) { /* column already exists */ }
+  }
+  database._save();
+
   console.log('Database initialized successfully.');
 }
 

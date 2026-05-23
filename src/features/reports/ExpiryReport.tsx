@@ -25,7 +25,7 @@ export default function ExpiryReport() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get<ExpiryItem[]>('/reports/expiry')
+    api.get<ExpiryItem[]>('/reports/expiries')
       .then(res => setItems(Array.isArray(res) ? res : (res as any).data ?? []))
       .catch(() => {})
       .finally(() => setLoading(false))

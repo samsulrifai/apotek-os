@@ -118,9 +118,9 @@ router.get('/stats', verifyToken, (req, res) => {
 
     res.json({
       totalItems: totalItems.count,
-      totalValue: totalValue.value,
+      inventoryValue: totalValue.value,
       criticalStock: criticalStock.count,
-      expiringCount: expiringCount.count
+      expiringBatches: expiringCount.count
     });
   } catch (err) {
     console.error('Inventory stats error:', err);
@@ -247,6 +247,23 @@ router.post('/adjust', verifyToken, (req, res) => {
   } catch (err) {
     console.error('Stock adjustment error:', err);
     res.status(500).json({ error: err.message || 'Gagal melakukan penyesuaian stok.' });
+  }
+});
+
+// GET /api/inventory/adjustments — list all stock adjustments
+router.get('/adjustments', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const adjustments = db.prepare(`
+      SELECT sa.*, u.full_name as created_by_name
+      FROM stock_adjustments sa
+      LEFT JOIN users u ON u.id = sa.created_by
+      ORDER BY sa.created_at DESC
+    `).all();
+    res.json(adjustments);
+  } catch (err) {
+    console.error('List adjustments error:', err);
+    res.status(500).json({ error: 'Gagal memuat daftar penyesuaian stok.' });
   }
 });
 

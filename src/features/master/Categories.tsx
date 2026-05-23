@@ -171,7 +171,7 @@ export default function Categories() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl text-slate-800 flex items-center">
               <FolderTree className="mr-2 h-5 w-5 text-teal-600" />
@@ -189,7 +189,7 @@ export default function Categories() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
             <Button onClick={handleSave} disabled={saving || !form.name} className="bg-teal-600 hover:bg-teal-700">
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               {editingItem ? 'Simpan' : 'Tambah'}
@@ -200,13 +200,13 @@ export default function Categories() {
 
       {/* Delete Confirmation */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-slate-800">Hapus Kategori?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-slate-600">Kategori yang sudah memiliki produk tidak dapat dihapus.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteConfirm(null)}>Batal</Button>
+            <Button type="button" variant="outline" onClick={() => setDeleteConfirm(null)}>Batal</Button>
             <Button variant="destructive" onClick={() => deleteConfirm && handleDelete(deleteConfirm)}>Hapus</Button>
           </DialogFooter>
         </DialogContent>

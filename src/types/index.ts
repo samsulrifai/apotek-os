@@ -93,6 +93,7 @@ export interface Product {
   min_stock: number
   default_purchase_price: number
   selling_price: number
+  custom_margin: number | null
   is_active: boolean
   created_at: string
   updated_at: string
@@ -135,6 +136,7 @@ export interface ProductFormData {
   min_stock: number
   default_purchase_price: number
   selling_price: number
+  custom_margin?: number | null
 }
 
 // --- Purchasing ---

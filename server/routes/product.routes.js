@@ -36,8 +36,8 @@ router.get('/', verifyToken, (req, res) => {
     const total = db.prepare(`SELECT COUNT(*) as count FROM products p ${whereClause}`).get(...params);
 
     const products = db.prepare(`
-      SELECT p.*, c.name as category_name, u.name as unit_name,
-             COALESCE(SUM(pb.qty_on_hand), 0) as stock_qty
+      SELECT p.*, c.name as category_name, u.name as unit_name, u.symbol as unit_symbol,
+             COALESCE(SUM(pb.qty_on_hand), 0) as total_stock
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN units u ON u.id = p.unit_id
@@ -117,14 +117,14 @@ router.get('/search', verifyToken, (req, res) => {
     const products = db.prepare(`
       SELECT p.id, p.sku, p.barcode, p.name, p.generic_name, p.selling_price, p.drug_class, p.form, p.strength,
              u.name as unit_name, u.symbol as unit_symbol,
-             COALESCE(SUM(pb.qty_on_hand), 0) as stock_qty
+             COALESCE(SUM(pb.qty_on_hand), 0) as total_stock
       FROM products p
       LEFT JOIN units u ON u.id = p.unit_id
       LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
       WHERE p.is_active = 1
         AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ? OR p.generic_name LIKE ?)
       GROUP BY p.id
-      HAVING stock_qty > 0
+      HAVING total_stock > 0
       ORDER BY p.name ASC
       LIMIT 20
     `).all(search, search, search, search);
@@ -174,7 +174,7 @@ router.post('/', verifyToken, (req, res) => {
     const {
       category_id, unit_id, sku, barcode, name, generic_name,
       form, strength, manufacturer, drug_class,
-      min_stock, default_purchase_price, selling_price
+      min_stock, default_purchase_price, selling_price, custom_margin
     } = req.body;
 
     if (!name) {
@@ -192,9 +192,9 @@ router.post('/', verifyToken, (req, res) => {
     const now = new Date().toISOString();
 
     db.prepare(`
-      INSERT INTO products (id, category_id, unit_id, sku, barcode, name, generic_name, form, strength, manufacturer, drug_class, min_stock, default_purchase_price, selling_price, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, category_id || null, unit_id || null, finalSku, barcode || null, name, generic_name || null, form || null, strength || null, manufacturer || null, drug_class || 'bebas', min_stock || 0, default_purchase_price || 0, selling_price || 0, now, now);
+      INSERT INTO products (id, category_id, unit_id, sku, barcode, name, generic_name, form, strength, manufacturer, drug_class, min_stock, default_purchase_price, selling_price, custom_margin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, category_id || null, unit_id || null, finalSku, barcode || null, name, generic_name || null, form || null, strength || null, manufacturer || null, drug_class || 'bebas', min_stock || 0, default_purchase_price || 0, selling_price || 0, custom_margin !== undefined && custom_margin !== null ? custom_margin : null, now, now);
 
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
     res.status(201).json(product);
@@ -220,7 +220,7 @@ router.put('/:id', verifyToken, (req, res) => {
     const {
       category_id, unit_id, sku, barcode, name, generic_name,
       form, strength, manufacturer, drug_class,
-      min_stock, default_purchase_price, selling_price, is_active
+      min_stock, default_purchase_price, selling_price, is_active, custom_margin
     } = req.body;
 
     const now = new Date().toISOString();
@@ -230,7 +230,7 @@ router.put('/:id', verifyToken, (req, res) => {
         category_id = ?, unit_id = ?, sku = ?, barcode = ?, name = ?, generic_name = ?,
         form = ?, strength = ?, manufacturer = ?, drug_class = ?,
         min_stock = ?, default_purchase_price = ?, selling_price = ?,
-        is_active = ?, updated_at = ?
+        custom_margin = ?, is_active = ?, updated_at = ?
       WHERE id = ?
     `).run(
       category_id !== undefined ? category_id : existing.category_id,
@@ -246,6 +246,7 @@ router.put('/:id', verifyToken, (req, res) => {
       min_stock !== undefined ? min_stock : existing.min_stock,
       default_purchase_price !== undefined ? default_purchase_price : existing.default_purchase_price,
       selling_price !== undefined ? selling_price : existing.selling_price,
+      custom_margin !== undefined ? (custom_margin !== null ? custom_margin : null) : existing.custom_margin,
       is_active !== undefined ? is_active : existing.is_active,
       now,
       req.params.id

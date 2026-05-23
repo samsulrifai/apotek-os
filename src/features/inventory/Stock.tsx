@@ -62,6 +62,15 @@ export default function Stock() {
     }
   }
 
+  const computeStatus = (item: StockItem) => {
+    if (item.status === 'empty' || item.total_stock === 0) return 'Habis'
+    if (item.status === 'critical' || item.total_stock <= item.min_stock) return 'Kritis'
+    if (item.status === 'low') return 'Rendah'
+    return 'Aman'
+  }
+
+  const enrichedItems = stockItems.map(item => ({ ...item, computed_status: computeStatus(item) }))
+
   const {
     paginatedData,
     totalPages,
@@ -75,7 +84,7 @@ export default function Stock() {
     globalSearch,
     setGlobalSearch,
     columnFilters
-  } = useTablePagination(stockItems)
+  } = useTablePagination(enrichedItems)
 
   if (loading) {
     return (
@@ -184,7 +193,7 @@ export default function Stock() {
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                 <Input type="search" placeholder="Cari nama obat atau SKU..." className="pl-9 bg-white border-slate-200" value={globalSearch} onChange={e => setGlobalSearch(e.target.value)} />
               </div>
-              <select className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-md outline-none text-slate-600 font-medium cursor-pointer" value={getFilter('status')} onChange={e => setFilter('status', e.target.value)}>
+              <select className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-md outline-none text-slate-600 font-medium cursor-pointer" value={getFilter('computed_status')} onChange={e => setFilter('computed_status', e.target.value)}>
                 <option value="">Semua Status</option>
                 <option value="Aman">Aman</option>
                 <option value="Rendah">Stok Rendah</option>
@@ -216,7 +225,7 @@ export default function Stock() {
                 </TableRow>
               ) : (
                 paginatedData.map((item) => (
-                  <TableRow key={item.product_id} className="hover:bg-slate-50 transition-colors">
+                  <TableRow key={item.id} className="hover:bg-slate-50 transition-colors">
                     <TableCell className="font-mono text-xs text-slate-400">{item.sku}</TableCell>
                     <TableCell>
                       <p className="font-bold text-slate-800">{item.product_name}</p>
@@ -226,7 +235,7 @@ export default function Stock() {
                     </TableCell>
                     <TableCell className="text-slate-600">{item.category_name || '-'}</TableCell>
                     <TableCell className="text-center font-bold">{item.total_stock}</TableCell>
-                    <TableCell className="text-center text-slate-500">{item.unit_symbol}</TableCell>
+                    <TableCell className="text-center text-slate-500">{item.unit_name}</TableCell>
                     <TableCell className="text-center">
                       {getStatusBadge(item)}
                     </TableCell>
