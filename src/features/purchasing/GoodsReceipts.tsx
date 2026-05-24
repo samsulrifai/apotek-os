@@ -41,14 +41,27 @@ export default function GoodsReceipts() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [receiptsRes, posRes] = await Promise.all([
+      const [receiptsRes, ...posResults] = await Promise.all([
         api.get<GoodsReceipt[]>('/goods-receipts'),
-        api.get<any>('/purchase-orders'),
+        // Fetch POs for each receivable status separately to ensure we get all
+        api.get<any>('/purchase-orders', { status: 'approved', limit: 100 }),
+        api.get<any>('/purchase-orders', { status: 'partial', limit: 100 }),
+        api.get<any>('/purchase-orders', { status: 'ordered', limit: 100 }),
       ])
       setReceipts(Array.isArray(receiptsRes) ? receiptsRes : (receiptsRes as any).data ?? [])
-      // PO list returns { data, pagination }
-      const poList = Array.isArray(posRes) ? posRes : posRes.data ?? []
-      setPurchaseOrders(poList)
+      // Merge all receivable POs
+      const allPOs: PurchaseOrder[] = []
+      const seenIds = new Set<string>()
+      for (const posRes of posResults) {
+        const poList = Array.isArray(posRes) ? posRes : posRes.data ?? []
+        for (const po of poList) {
+          if (!seenIds.has(po.id)) {
+            seenIds.add(po.id)
+            allPOs.push(po)
+          }
+        }
+      }
+      setPurchaseOrders(allPOs)
     } catch { /* silently */ }
     finally { setLoading(false) }
   }, [])
@@ -124,7 +137,8 @@ export default function GoodsReceipts() {
   }
 
   // Only show POs that can receive goods
-  const receivablePOs = purchaseOrders.filter(po => ['approved', 'partial', 'draft'].includes(po.status))
+  // All POs fetched are already filtered to receivable statuses, but filter again just in case
+  const receivablePOs = purchaseOrders.filter(po => ['approved', 'partial', 'ordered'].includes(po.status))
 
   const {
     paginatedData,
