@@ -44,9 +44,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('auth_token', res.token)
       setUser(res.user)
     } catch (err) {
-      const message = err instanceof ApiError
-        ? err.message
-        : 'Gagal terhubung ke server'
+      let message: string
+      if (err instanceof ApiError) {
+        message = err.message
+      } else if (err instanceof TypeError) {
+        // Network error (fetch failed, DNS error, etc.)
+        message = `Gagal terhubung ke server: ${err.message}`
+      } else {
+        message = 'Terjadi kesalahan. Silakan coba lagi.'
+      }
       setError(message)
       throw err
     } finally {
