@@ -13,6 +13,10 @@ router.post('/login', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: 'Username dan password harus diisi.' });
     }
+    // Limit input length to prevent DoS via bcrypt long-string attack
+    if (username.length > 64 || password.length > 128) {
+      return res.status(400).json({ error: 'Username atau password tidak valid.' });
+    }
 
     const user = await queryOne('SELECT * FROM users WHERE username = ?', [username]);
 
@@ -58,7 +62,9 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Login error:', err);
+    const isProd = process.env.NODE_ENV === 'production';
+    if (isProd) console.error('Login error:', err.message);
+    else console.error('Login error:', err);
     res.status(500).json({ error: 'Terjadi kesalahan saat login.' });
   }
 });

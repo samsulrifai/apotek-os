@@ -1,7 +1,20 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const errorHandler = require('./middleware/errorHandler');
+
+// Validate required environment variables at startup
+const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET'];
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length > 0) {
+  console.error(`[FATAL] Missing required environment variables: ${missingEnv.join(', ')}`);
+  console.error('Set them in Vercel → Settings → Environment Variables');
+  // In serverless (Vercel) we cannot process.exit — instead throw so the
+  // first request gets a 500 with a clear message rather than a silent hang.
+  if (require.main === module) process.exit(1);
+}
 
 // Import routes
 const authRoutes = require('./routes/auth.routes');
@@ -20,26 +33,48 @@ const auditRoutes = require('./routes/audit.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const isProd = process.env.NODE_ENV === 'production';
+
+// ─── Security Headers (Helmet) ─────────────────────────────────────────────
+app.use(helmet({
+  // Loosen CSP for Vite's inline styles/scripts when serving from same origin
+  contentSecurityPolicy: false,
+}));
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
-// In production (Vercel) allow all origins because the frontend is served
-// from the same Vercel domain and requests go to /api/* on the same origin.
-// The wildcard is safe here because the API is protected by JWT anyway.
 const corsOptions = process.env.ALLOWED_ORIGINS
-  ? {
-      origin: process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()),
-      credentials: true,
-    }
-  : {
-      origin: true, // reflect the request origin (allows all)
-      credentials: true,
-    };
-
+  ? { origin: process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()), credentials: true }
+  : { origin: true, credentials: true };
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ─── Body Parser ───────────────────────────────────────────────────────────
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+
+// ─── Global API Rate Limiter ───────────────────────────────────────────────
+// Prevents abuse of any API endpoint
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500,                  // max 500 requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Terlalu banyak permintaan. Coba lagi dalam beberapa menit.' },
+});
+app.use('/api', globalLimiter);
+
+// ─── Strict Login Rate Limiter ─────────────────────────────────────────────
+// Prevents brute-force on login endpoint
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,                   // max 10 login attempts per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Terlalu banyak percobaan login. Coba lagi dalam 15 menit.' },
+  skipSuccessfulRequests: true, // don't count successful logins
+});
 
 // ─── API Routes ────────────────────────────────────────────────────────────
+app.use('/api/auth/login', loginLimiter);   // apply login limiter first
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/products', productRoutes);
@@ -77,7 +112,6 @@ app.get('/api/health', async (req, res) => {
 app.use(errorHandler);
 
 // ─── Local dev: listen on port ─────────────────────────────────────────────
-// In Vercel (serverless), this block is skipped; the module.exports below is used.
 if (require.main === module) {
   const { initializeDatabase } = require('./db/database');
   initializeDatabase()
@@ -88,8 +122,8 @@ if (require.main === module) {
         console.log('============================================');
         console.log(`  Status  : Running`);
         console.log(`  Port    : ${PORT}`);
+        console.log(`  Env     : ${isProd ? 'production' : 'development'}`);
         console.log(`  API     : http://localhost:${PORT}/api`);
-        console.log(`  Frontend: http://localhost:5173`);
         console.log('============================================');
       });
     })

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, execute } = require('../db/database');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/products — list with search, category filter, pagination
@@ -155,8 +155,8 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// POST /api/products — create product
-router.post('/', verifyToken, async (req, res) => {
+// POST /api/products — create product (admin, apoteker only)
+router.post('/', verifyToken, requireRole('admin', 'apoteker'), async (req, res) => {
   try {
     const {
       category_id, unit_id, sku, barcode, name, generic_name,
@@ -165,6 +165,20 @@ router.post('/', verifyToken, async (req, res) => {
     } = req.body;
 
     if (!name) return res.status(400).json({ error: 'Nama produk harus diisi.' });
+
+    // Validate drug_class whitelist
+    const VALID_DRUG_CLASSES = ['bebas', 'bebas_terbatas', 'keras', 'narkotika', 'psikotropika'];
+    if (drug_class && !VALID_DRUG_CLASSES.includes(drug_class)) {
+      return res.status(400).json({ error: `Golongan obat tidak valid. Pilihan: ${VALID_DRUG_CLASSES.join(', ')}` });
+    }
+
+    // Validate numeric fields
+    if (selling_price !== undefined && (isNaN(Number(selling_price)) || Number(selling_price) < 0)) {
+      return res.status(400).json({ error: 'Harga jual tidak valid.' });
+    }
+    if (min_stock !== undefined && (isNaN(Number(min_stock)) || Number(min_stock) < 0)) {
+      return res.status(400).json({ error: 'Stok minimum tidak valid.' });
+    }
 
     let finalSku = sku;
     if (!finalSku) {
@@ -192,8 +206,8 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-// PUT /api/products/:id — update product
-router.put('/:id', verifyToken, async (req, res) => {
+// PUT /api/products/:id — update product (admin, apoteker only)
+router.put('/:id', verifyToken, requireRole('admin', 'apoteker'), async (req, res) => {
   try {
     const existing = await queryOne('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Produk tidak ditemukan.' });
@@ -244,8 +258,8 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// DELETE /api/products/:id — soft delete
-router.delete('/:id', verifyToken, async (req, res) => {
+// DELETE /api/products/:id — soft delete (admin only)
+router.delete('/:id', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const existing = await queryOne('SELECT * FROM products WHERE id = ?', [req.params.id]);
     if (!existing) return res.status(404).json({ error: 'Produk tidak ditemukan.' });

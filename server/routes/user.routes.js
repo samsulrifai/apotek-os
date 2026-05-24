@@ -31,7 +31,8 @@ router.post('/', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const { full_name, email, username, password, role } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username dan password harus diisi.' });
-    if (password.length < 6) return res.status(400).json({ error: 'Password minimal 6 karakter.' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password minimal 8 karakter.' });
+    if (password.length > 128) return res.status(400).json({ error: 'Password terlalu panjang.' });
 
     const existing = await queryOne('SELECT id FROM users WHERE username = ?', [username]);
     if (existing) return res.status(409).json({ error: 'Username sudah digunakan.' });
@@ -80,7 +81,8 @@ router.put('/change-password', verifyToken, async (req, res) => {
   try {
     const { current_password, new_password } = req.body;
     if (!current_password || !new_password) return res.status(400).json({ error: 'Password lama dan baru wajib diisi.' });
-    if (new_password.length < 6) return res.status(400).json({ error: 'Password baru minimal 6 karakter.' });
+    if (new_password.length < 8) return res.status(400).json({ error: 'Password baru minimal 8 karakter.' });
+    if (new_password.length > 128) return res.status(400).json({ error: 'Password terlalu panjang.' });
 
     const user = await queryOne('SELECT * FROM users WHERE id = ?', [req.user.id]);
     const valid = await bcrypt.compare(current_password, user.password_hash);
@@ -111,7 +113,8 @@ router.put('/:id', verifyToken, requireRole('admin'), async (req, res) => {
 
       let passwordHash = existing.password_hash;
       if (password) {
-        if (password.length < 6) throw new Error('Password minimal 6 karakter.');
+        if (password.length < 8) throw new Error('Password minimal 8 karakter.');
+        if (password.length > 128) throw new Error('Password terlalu panjang.');
         passwordHash = bcrypt.hashSync(password, 10);
       }
 
