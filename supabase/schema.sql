@@ -358,6 +358,7 @@ BEGIN
     'app_settings','audit_logs'
   ])
   LOOP
+    EXECUTE format('DROP POLICY IF EXISTS "allow_all_%s" ON %I', t, t);
     EXECUTE format('CREATE POLICY "allow_all_%s" ON %I FOR ALL USING (true) WITH CHECK (true)', t, t);
   END LOOP;
 END $$;
