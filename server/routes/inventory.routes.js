@@ -221,39 +221,45 @@ router.post('/adjust', verifyToken, (req, res) => {
           throw new Error('product_id dan qty_after harus diisi untuk setiap item.');
         }
 
-        // Get all active batches for this product
+        // Get all active batches for this product (FEFO order)
         const allBatches = db.prepare(
           'SELECT * FROM product_batches WHERE product_id = ? AND status = ? ORDER BY expiry_date ASC'
         ).all(product_id, 'active');
 
         // Calculate total current stock
         const totalCurrentStock = allBatches.reduce((sum, b) => sum + (b.qty_on_hand || 0), 0);
-        const qtyBefore = item.qty_before !== undefined ? item.qty_before : totalCurrentStock;
+        const qtyBefore = totalCurrentStock;
         const qtyDiff = qty_after - qtyBefore;
 
-        // If specific batch provided, use it
-        let batch = null;
-        if (product_batch_id) {
-          batch = db.prepare('SELECT * FROM product_batches WHERE id = ?').get(product_batch_id);
-          if (!batch) throw new Error(`Batch ${product_batch_id} tidak ditemukan.`);
-        } else if (allBatches.length > 0) {
-          // Auto-select: for decrease use FEFO (first expiry), for increase use last batch
-          batch = qtyDiff < 0 ? allBatches[0] : allBatches[allBatches.length - 1];
-          product_batch_id = batch.id;
-        }
-
+        // Record the adjustment item
+        const primaryBatch = allBatches.length > 0 ? allBatches[0] : null;
         const itemId = uuidv4();
-        insertItem.run(itemId, adjustmentId, product_id, product_batch_id || null, qtyBefore, qty_after, qtyDiff);
+        insertItem.run(itemId, adjustmentId, product_id, product_batch_id || (primaryBatch ? primaryBatch.id : null), qtyBefore, qty_after, qtyDiff);
 
-        // Update batch qty
-        if (batch && product_batch_id) {
-          if (allBatches.length === 1) {
-            // Single batch — set directly to qty_after
-            updateBatch.run(qty_after, now, product_batch_id);
+        // Distribute the change across batches
+        if (product_batch_id) {
+          // Specific batch targeted — only update that batch
+          const batch = db.prepare('SELECT * FROM product_batches WHERE id = ?').get(product_batch_id);
+          if (batch) {
+            const newQty = Math.max(0, batch.qty_on_hand + qtyDiff);
+            updateBatch.run(newQty, now, product_batch_id);
+          }
+        } else if (allBatches.length > 0) {
+          if (qtyDiff <= 0) {
+            // DECREASE: drain batches FEFO until we've removed enough
+            let remaining = Math.abs(qtyDiff);
+            for (const b of allBatches) {
+              if (remaining <= 0) break;
+              const drain = Math.min(b.qty_on_hand, remaining);
+              updateBatch.run(b.qty_on_hand - drain, now, b.id);
+              remaining -= drain;
+            }
+            product_batch_id = allBatches[0].id;
           } else {
-            // Multiple batches — apply the difference to the selected batch
-            const newBatchQty = Math.max(0, batch.qty_on_hand + qtyDiff);
-            updateBatch.run(newBatchQty, now, product_batch_id);
+            // INCREASE: add to the last batch (most recent)
+            const lastBatch = allBatches[allBatches.length - 1];
+            updateBatch.run(lastBatch.qty_on_hand + qtyDiff, now, lastBatch.id);
+            product_batch_id = lastBatch.id;
           }
         }
 
@@ -266,7 +272,7 @@ router.post('/adjust', verifyToken, (req, res) => {
           movementId, product_id, product_batch_id || null,
           'adjustment', 'stock_adjustment', adjustmentId,
           qtyIn, qtyOut,
-          batch ? batch.purchase_price : 0,
+          primaryBatch ? primaryBatch.purchase_price : 0,
           `Penyesuaian stok: ${reason}`,
           req.user.id, now
         );
