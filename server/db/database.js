@@ -1,21 +1,43 @@
 const { Pool } = require('pg');
 
-// Connection pool — works with Supabase direct or pooler connection
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes('supabase') ? { rejectUnauthorized: false } : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-});
+// ─── Pool (lazy singleton) ─────────────────────────────────────────────────
+// We create the pool lazily so that missing DATABASE_URL at module load time
+// does not crash the process — the error will be thrown on the first query,
+// which gives a cleaner 500 with a useful message instead of a cold-start crash.
 
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle client', err);
-});
+let _pool = null;
 
+function getPool() {
+  if (!_pool) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error(
+        'DATABASE_URL environment variable is not set. ' +
+        'Set it in Vercel → Settings → Environment Variables.'
+      );
+    }
+
+    _pool = new Pool({
+      connectionString,
+      ssl: connectionString.includes('supabase')
+        ? { rejectUnauthorized: false }
+        : false,
+      max: 5,                     // keep low for serverless (each fn has own pool)
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    _pool.on('error', (err) => {
+      console.error('[DB] Unexpected error on idle client:', err.message);
+    });
+  }
+  return _pool;
+}
+
+// ─── Placeholder converter ─────────────────────────────────────────────────
 /**
  * Convert SQLite-style ? placeholders to PostgreSQL $1, $2, ... style.
- * Handles ? inside single-quoted strings by skipping them.
+ * Skips ? characters inside single-quoted strings.
  */
 function convertParams(sql) {
   let idx = 0;
@@ -35,13 +57,15 @@ function convertParams(sql) {
   return result;
 }
 
+// ─── Query helpers ─────────────────────────────────────────────────────────
+
 /**
  * Execute a query and return all rows.
  * Replaces: db.prepare(sql).all(...params)
  */
 async function query(sql, params = []) {
   const pgSql = convertParams(sql);
-  const { rows } = await pool.query(pgSql, params);
+  const { rows } = await getPool().query(pgSql, params);
   return rows;
 }
 
@@ -51,7 +75,7 @@ async function query(sql, params = []) {
  */
 async function queryOne(sql, params = []) {
   const pgSql = convertParams(sql);
-  const { rows } = await pool.query(pgSql, params);
+  const { rows } = await getPool().query(pgSql, params);
   return rows[0] || undefined;
 }
 
@@ -61,29 +85,19 @@ async function queryOne(sql, params = []) {
  */
 async function execute(sql, params = []) {
   const pgSql = convertParams(sql);
-  const result = await pool.query(pgSql, params);
+  const result = await getPool().query(pgSql, params);
   return { changes: result.rowCount, rowCount: result.rowCount };
 }
 
-/**
- * Get the raw pool for transactions.
- */
-function getPool() {
-  return pool;
-}
-
-/**
- * Test the database connection.
- */
+// ─── Connection test (used by local dev startup) ───────────────────────────
 async function initializeDatabase() {
+  const pool = getPool();
+  const client = await pool.connect();
   try {
-    const client = await pool.connect();
     await client.query('SELECT 1');
+    console.log('[DB] Connected to Supabase PostgreSQL successfully.');
+  } finally {
     client.release();
-    console.log('Database connected successfully (Supabase PostgreSQL).');
-  } catch (err) {
-    console.error('Failed to connect to database:', err.message);
-    throw err;
   }
 }
 

@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { initializeDatabase } = require('./db/database');
 const errorHandler = require('./middleware/errorHandler');
 
 // Import routes
@@ -22,17 +21,25 @@ const auditRoutes = require('./routes/audit.routes');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : ['http://localhost:5173', 'http://127.0.0.1:5173'],
-  credentials: true
-}));
+// ─── CORS ──────────────────────────────────────────────────────────────────
+// In production (Vercel) allow all origins because the frontend is served
+// from the same Vercel domain and requests go to /api/* on the same origin.
+// The wildcard is safe here because the API is protected by JWT anyway.
+const corsOptions = process.env.ALLOWED_ORIGINS
+  ? {
+      origin: process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim()),
+      credentials: true,
+    }
+  : {
+      origin: true, // reflect the request origin (allows all)
+      credentials: true,
+    };
+
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// API Routes
+// ─── API Routes ────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/products', productRoutes);
@@ -55,37 +62,41 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/audit-logs', auditRoutes);
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check — also tests DB connection
+app.get('/api/health', async (req, res) => {
+  try {
+    const { query } = require('./db/database');
+    await query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ status: 'error', db: 'disconnected', error: err.message });
+  }
 });
 
 // Error handler
 app.use(errorHandler);
 
-// Initialize database and start server
-async function start() {
-  try {
-    await initializeDatabase();
-    const server = app.listen(PORT, () => {
-      console.log('============================================');
-      console.log('  Apotek Web Server');
-      console.log('============================================');
-      console.log(`  Status  : Running`);
-      console.log(`  Port    : ${PORT}`);
-      console.log(`  API     : http://localhost:${PORT}/api`);
-      console.log(`  Frontend: http://localhost:5173`);
-      console.log('============================================');
-    });
-    return server;
-  } catch (err) {
-    console.error('Failed to start server:', err);
-    process.exit(1);
-  }
-}
-
+// ─── Local dev: listen on port ─────────────────────────────────────────────
+// In Vercel (serverless), this block is skipped; the module.exports below is used.
 if (require.main === module) {
-  start();
+  const { initializeDatabase } = require('./db/database');
+  initializeDatabase()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log('============================================');
+        console.log('  Apotek Web Server');
+        console.log('============================================');
+        console.log(`  Status  : Running`);
+        console.log(`  Port    : ${PORT}`);
+        console.log(`  API     : http://localhost:${PORT}/api`);
+        console.log(`  Frontend: http://localhost:5173`);
+        console.log('============================================');
+      });
+    })
+    .catch(err => {
+      console.error('Failed to start server:', err);
+      process.exit(1);
+    });
 }
 
 module.exports = app;
