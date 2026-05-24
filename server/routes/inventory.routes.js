@@ -285,4 +285,34 @@ router.get('/adjustments', verifyToken, (req, res) => {
   }
 });
 
+// GET /api/inventory/adjustments/:id — detail with items
+router.get('/adjustments/:id', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const adj = db.prepare(`
+      SELECT sa.*, u.full_name as created_by_name
+      FROM stock_adjustments sa
+      LEFT JOIN users u ON u.id = sa.created_by
+      WHERE sa.id = ?
+    `).get(req.params.id);
+
+    if (!adj) {
+      return res.status(404).json({ error: 'Penyesuaian stok tidak ditemukan.' });
+    }
+
+    const items = db.prepare(`
+      SELECT sai.*, p.name as product_name, p.sku, pb.batch_number
+      FROM stock_adjustment_items sai
+      LEFT JOIN products p ON p.id = sai.product_id
+      LEFT JOIN product_batches pb ON pb.id = sai.product_batch_id
+      WHERE sai.stock_adjustment_id = ?
+    `).all(req.params.id);
+
+    res.json({ ...adj, items });
+  } catch (err) {
+    console.error('Get adjustment detail error:', err);
+    res.status(500).json({ error: 'Gagal memuat detail penyesuaian stok.' });
+  }
+});
+
 module.exports = router;

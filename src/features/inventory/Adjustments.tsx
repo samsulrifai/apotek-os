@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { Sliders, Plus, Search, Loader2, Save, AlertCircle, X, Package } from "lucide-react"
+import { Sliders, Plus, Search, Loader2, Save, AlertCircle, X, Package, Eye, ArrowUp, ArrowDown, Minus } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,11 +15,27 @@ import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
 import { useToast } from "@/hooks/use-toast"
 
+interface AdjustmentDetail extends StockAdjustment {
+  items: {
+    id: string
+    product_id: string
+    product_name: string
+    sku: string
+    batch_number: string | null
+    qty_before: number
+    qty_after: number
+    qty_difference: number
+  }[]
+}
+
 export default function Adjustments() {
   const [adjustments, setAdjustments] = useState<StockAdjustment[]>([])
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailData, setDetailData] = useState<AdjustmentDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
 
@@ -88,8 +104,36 @@ export default function Adjustments() {
     finally { setSaving(false) }
   }
 
+  const handleViewDetail = async (id: string) => {
+    setDetailLoading(true)
+    setDetailOpen(true)
+    setDetailData(null)
+    try {
+      const data = await api.get<AdjustmentDetail>(`/inventory/adjustments/${id}`)
+      setDetailData(data)
+    } catch {
+      toast({ title: "Gagal", description: "Gagal memuat detail penyesuaian.", variant: "destructive" })
+      setDetailOpen(false)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const getReasonLabel = (reason: string) => {
+    const map: Record<string, string> = {
+      stock_opname: 'Stok Opname',
+      damaged: 'Barang Rusak',
+      expired: 'Kedaluwarsa',
+      lost: 'Hilang / Selisih',
+      correction: 'Koreksi Data',
+      other: 'Lainnya',
+    }
+    return map[reason] || reason
+  }
+
   const getStatusBadge = (status: string) => {
     switch(status) {
+      case 'completed': return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Selesai</Badge>
       case 'approved': return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Disetujui</Badge>
       case 'pending': return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Menunggu</Badge>
       case 'rejected': return <Badge variant="destructive">Ditolak</Badge>
@@ -154,12 +198,13 @@ export default function Adjustments() {
                 <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Dibuat Oleh</span></TableHead>
                 <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Tanggal</span></TableHead>
                 <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Status</span></TableHead>
+                <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Aksi</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-12 text-slate-400">
+                  <TableCell colSpan={6} className="text-center py-12 text-slate-400">
                     {globalSearch ? 'Tidak ada hasil pencarian' : 'Belum ada penyesuaian stok'}
                   </TableCell>
                 </TableRow>
@@ -167,12 +212,22 @@ export default function Adjustments() {
                 paginatedData.map((adj) => (
                   <TableRow key={adj.id} className="hover:bg-slate-50 transition-colors">
                     <TableCell className="font-bold text-slate-800 font-mono">{adj.adjustment_number}</TableCell>
-                    <TableCell className="text-slate-700 text-sm">{adj.reason}</TableCell>
+                    <TableCell className="text-slate-700 text-sm">{getReasonLabel(adj.reason)}</TableCell>
                     <TableCell className="text-slate-600 text-sm">{adj.created_by_name || '-'}</TableCell>
                     <TableCell className="text-slate-600 text-sm">
                       {new Date(adj.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                     </TableCell>
                     <TableCell className="text-center">{getStatusBadge(adj.status)}</TableCell>
+                    <TableCell className="text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-xs text-teal-600 hover:text-teal-700 hover:bg-teal-50 font-semibold"
+                        onClick={() => handleViewDetail(adj.id)}
+                      >
+                        <Eye className="mr-1.5 h-3.5 w-3.5" /> Detail
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -188,6 +243,128 @@ export default function Adjustments() {
           onItemsPerPageChange={setItemsPerPage}
         />
       </Card>
+
+      {/* Detail Dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0">
+          {/* Header */}
+          <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+            <DialogHeader>
+              <DialogTitle className="text-xl text-slate-800 flex items-center">
+                <div className="h-9 w-9 rounded-lg bg-teal-100 flex items-center justify-center mr-3">
+                  <Eye className="h-5 w-5 text-teal-600" />
+                </div>
+                Detail Penyesuaian
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+            {detailLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-teal-600" />
+              </div>
+            ) : detailData ? (
+              <>
+                {/* Info Header */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">No. Penyesuaian</p>
+                    <p className="text-sm font-bold text-slate-800 font-mono mt-1">{detailData.adjustment_number}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Tanggal</p>
+                    <p className="text-sm font-bold text-slate-800 mt-1">
+                      {new Date(detailData.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Alasan</p>
+                    <p className="text-sm font-bold text-slate-800 mt-1">{getReasonLabel(detailData.reason)}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Dibuat Oleh</p>
+                    <p className="text-sm font-bold text-slate-800 mt-1">{detailData.created_by_name || '-'}</p>
+                  </div>
+                </div>
+
+                {detailData.notes && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
+                    <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Catatan</p>
+                    <p className="text-sm text-slate-700 mt-1">{detailData.notes}</p>
+                  </div>
+                )}
+
+                {/* Items Table */}
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Package className="h-4 w-4 text-teal-600" />
+                    <h3 className="font-bold text-slate-700 text-sm">Item yang Disesuaikan</h3>
+                    <Badge variant="outline" className="ml-1 text-xs bg-slate-50 text-slate-500 border-slate-200">{detailData.items?.length || 0} item</Badge>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    <Table>
+                      <TableHeader className="bg-slate-50/80">
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Produk</span></TableHead>
+                          <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Batch</span></TableHead>
+                          <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Stok Awal</span></TableHead>
+                          <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Stok Akhir</span></TableHead>
+                          <TableHead className="text-center"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Selisih</span></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(detailData.items || []).length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={5} className="text-center py-6 text-slate-400 text-sm">
+                              Tidak ada item
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          detailData.items.map((item) => {
+                            const diff = item.qty_difference ?? (item.qty_after - item.qty_before)
+                            return (
+                              <TableRow key={item.id} className="hover:bg-slate-50/50">
+                                <TableCell>
+                                  <p className="font-semibold text-slate-800 text-sm">{item.product_name || '-'}</p>
+                                  <p className="text-xs text-slate-400 font-mono">{item.sku || ''}</p>
+                                </TableCell>
+                                <TableCell className="text-center text-sm text-slate-600 font-mono">
+                                  {item.batch_number || '-'}
+                                </TableCell>
+                                <TableCell className="text-center text-sm font-medium text-slate-600">
+                                  {item.qty_before}
+                                </TableCell>
+                                <TableCell className="text-center text-sm font-medium text-slate-800">
+                                  {item.qty_after}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${
+                                    diff > 0 ? 'bg-emerald-50 text-emerald-700' : diff < 0 ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-500'
+                                  }`}>
+                                    {diff > 0 ? <ArrowUp className="h-3 w-3" /> : diff < 0 ? <ArrowDown className="h-3 w-3" /> : <Minus className="h-3 w-3" />}
+                                    {diff > 0 ? '+' : ''}{diff}
+                                  </span>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          {/* Footer */}
+          <DialogFooter className="px-6 py-4 border-t border-slate-100">
+            <Button variant="outline" onClick={() => setDetailOpen(false)}>Tutup</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create Adjustment Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
