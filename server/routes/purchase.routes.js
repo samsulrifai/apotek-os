@@ -52,6 +52,264 @@ router.get('/', verifyToken, (req, res) => {
   }
 });
 
+// ============================================================
+// GOODS RECEIPTS routes — MUST be before /:id to avoid conflicts
+// ============================================================
+
+// GET /api/goods-receipts
+router.get('/goods-receipts', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const receipts = db.prepare(`
+      SELECT gr.*, po.po_number, s.name as supplier_name, u.full_name as received_by_name
+      FROM goods_receipts gr
+      LEFT JOIN purchase_orders po ON po.id = gr.purchase_order_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      LEFT JOIN users u ON u.id = gr.received_by
+      ORDER BY gr.created_at DESC
+    `).all();
+
+    res.json(receipts);
+  } catch (err) {
+    console.error('List GR error:', err);
+    res.status(500).json({ error: 'Gagal memuat daftar penerimaan barang.' });
+  }
+});
+
+// POST /api/goods-receipts
+router.post('/goods-receipts', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const { purchase_order_id, received_date, notes, items } = req.body;
+
+    if (!purchase_order_id) {
+      return res.status(400).json({ error: 'Purchase Order harus dipilih.' });
+    }
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Minimal satu item harus diisi.' });
+    }
+
+    const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(purchase_order_id);
+    if (!po) {
+      return res.status(404).json({ error: 'Purchase Order tidak ditemukan.' });
+    }
+
+    const id = uuidv4();
+    const now = new Date().toISOString();
+
+    const count = db.prepare('SELECT COUNT(*) as count FROM goods_receipts').get();
+    const receiptNumber = `GR-${now.split('T')[0].replace(/-/g, '')}-${String(count.count + 1).padStart(4, '0')}`;
+
+    const transaction = db.transaction(() => {
+      // Create goods receipt
+      db.prepare(`
+        INSERT INTO goods_receipts (id, purchase_order_id, receipt_number, received_date, received_by, notes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(id, purchase_order_id, receiptNumber, received_date || now, req.user.id, notes || null, now);
+
+      const insertGrItem = db.prepare(`
+        INSERT INTO goods_receipt_items (id, goods_receipt_id, product_id, product_batch_id, qty_received, unit_price)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+
+      const upsertBatch = db.prepare(`
+        INSERT INTO product_batches (id, product_id, batch_number, manufacture_date, expiry_date, purchase_price, qty_on_hand, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        ON CONFLICT(product_id, batch_number) DO UPDATE SET
+          qty_on_hand = qty_on_hand + ?,
+          purchase_price = ?,
+          updated_at = ?
+      `);
+
+      const insertMovement = db.prepare(`
+        INSERT INTO stock_movements (id, product_id, product_batch_id, movement_type, reference_type, reference_id, qty_in, qty_out, unit_cost, notes, created_by, created_at)
+        VALUES (?, ?, ?, 'in', 'goods_receipt', ?, ?, 0, ?, ?, ?, ?)
+      `);
+
+      const updatePoItem = db.prepare(`
+        UPDATE purchase_order_items SET qty_received = qty_received + ?
+        WHERE purchase_order_id = ? AND product_id = ?
+      `);
+
+      for (const item of items) {
+        const { product_id, batch_number, manufacture_date, expiry_date, qty_received, unit_price } = item;
+
+        if (!product_id || !batch_number || !qty_received) {
+          throw new Error('product_id, batch_number, dan qty_received harus diisi.');
+        }
+
+        // Check if batch exists
+        let batchId;
+        const existingBatch = db.prepare('SELECT id FROM product_batches WHERE product_id = ? AND batch_number = ?').get(product_id, batch_number);
+
+        if (existingBatch) {
+          batchId = existingBatch.id;
+        } else {
+          batchId = uuidv4();
+        }
+
+        // Upsert batch
+        upsertBatch.run(
+          batchId, product_id, batch_number,
+          manufacture_date || null, expiry_date || null,
+          unit_price || 0, qty_received, now, now,
+          qty_received, unit_price || 0, now
+        );
+
+        // Create GR item
+        insertGrItem.run(uuidv4(), id, product_id, batchId, qty_received, unit_price || 0);
+
+        // Create stock movement
+        insertMovement.run(uuidv4(), product_id, batchId, id, qty_received, unit_price || 0, `Penerimaan barang: ${receiptNumber}`, req.user.id, now);
+
+        // Update PO item qty_received
+        updatePoItem.run(qty_received, purchase_order_id, product_id);
+      }
+
+      // Check if PO is fully received
+      const poItems = db.prepare('SELECT * FROM purchase_order_items WHERE purchase_order_id = ?').all(purchase_order_id);
+      const allReceived = poItems.every(item => item.qty_received >= item.qty_ordered);
+      const someReceived = poItems.some(item => item.qty_received > 0);
+
+      if (allReceived) {
+        db.prepare('UPDATE purchase_orders SET status = ?, updated_at = ? WHERE id = ?').run('completed', now, purchase_order_id);
+      } else if (someReceived) {
+        db.prepare('UPDATE purchase_orders SET status = ?, updated_at = ? WHERE id = ?').run('partial', now, purchase_order_id);
+      }
+    });
+
+    transaction();
+
+    // Set due_date on PO to 30 days from received_date if not already set
+    const receivedDate = received_date || now;
+    const dueDate = new Date(new Date(receivedDate).getTime() + 30*24*60*60*1000).toISOString().split('T')[0];
+    db.prepare('UPDATE purchase_orders SET due_date = COALESCE(due_date, ?), updated_at = ? WHERE id = ?')
+      .run(dueDate, now, purchase_order_id);
+    db._save();
+
+    const gr = db.prepare('SELECT * FROM goods_receipts WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_goods_receipt', 'goods_receipt', id, { receipt_number: receiptNumber, purchase_order_id });
+    res.status(201).json(gr);
+  } catch (err) {
+    console.error('Create GR error:', err);
+    res.status(500).json({ error: err.message || 'Gagal membuat penerimaan barang.' });
+  }
+});
+
+// ============================================================
+// INVOICES routes — MUST be before /:id to avoid conflicts
+// ============================================================
+
+// GET /api/invoices
+router.get('/invoices', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const invoices = db.prepare(`
+      SELECT po.id, po.po_number, po.order_date, po.status, po.total_amount,
+             po.payment_status, po.due_date, po.paid_at,
+             s.name as supplier_name,
+             gr.receipt_number, gr.received_date
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+      WHERE po.status IN ('completed', 'partial')
+      ORDER BY po.created_at DESC
+    `).all();
+
+    // Compute effective payment_status
+    const now = new Date();
+    const result = invoices.map(inv => {
+      let paymentStatus = inv.payment_status || 'unpaid';
+      const dueDate = inv.due_date || (inv.received_date ? new Date(new Date(inv.received_date).getTime() + 30*24*60*60*1000).toISOString().split('T')[0] : null);
+      
+      if (paymentStatus !== 'paid' && dueDate && new Date(dueDate) < now) {
+        paymentStatus = 'overdue';
+      }
+      
+      return {
+        ...inv,
+        payment_status: paymentStatus,
+        due_date: dueDate,
+        received_date: inv.received_date || inv.order_date,
+      };
+    });
+
+    res.json(result);
+  } catch (err) {
+    console.error('List invoices error:', err);
+    res.status(500).json({ error: 'Gagal memuat daftar faktur.' });
+  }
+});
+
+// GET /api/invoices/stats
+router.get('/invoices/stats', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+
+    const allInvoices = db.prepare(`
+      SELECT po.total_amount, po.payment_status, po.due_date, po.paid_at, po.order_date,
+             gr.received_date
+      FROM purchase_orders po
+      LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
+      WHERE po.status IN ('completed', 'partial')
+    `).all();
+
+    const now = new Date();
+    const thisMonth = now.toISOString().slice(0, 7); // YYYY-MM
+    
+    let totalDebt = 0;
+    let unpaidCount = 0;
+    let overdueCount = 0;
+    let paidThisMonth = 0;
+
+    for (const inv of allInvoices) {
+      const status = inv.payment_status || 'unpaid';
+      const dueDate = inv.due_date || (inv.received_date ? new Date(new Date(inv.received_date).getTime() + 30*24*60*60*1000).toISOString().split('T')[0] : null);
+
+      if (status === 'paid') {
+        if (inv.paid_at && inv.paid_at.slice(0, 7) === thisMonth) {
+          paidThisMonth += inv.total_amount || 0;
+        }
+      } else {
+        totalDebt += inv.total_amount || 0;
+        unpaidCount++;
+        if (dueDate && new Date(dueDate) < now) {
+          overdueCount++;
+        }
+      }
+    }
+
+    res.json({ totalDebt, unpaidCount, overdueCount, paidThisMonth });
+  } catch (err) {
+    console.error('Invoice stats error:', err);
+    res.status(500).json({ error: 'Gagal memuat statistik faktur.' });
+  }
+});
+
+// PUT /api/invoices/:id/pay — mark invoice as paid
+router.put('/invoices/:id/pay', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(req.params.id);
+    if (!po) {
+      return res.status(404).json({ error: 'Faktur tidak ditemukan.' });
+    }
+    const now = new Date().toISOString();
+    db.prepare('UPDATE purchase_orders SET payment_status = ?, paid_at = ?, updated_at = ? WHERE id = ?')
+      .run('paid', now, now, req.params.id);
+    
+    logAudit(req.user?.id, 'pay_invoice', 'purchase_order', req.params.id, { po_number: po.po_number });
+    res.json({ message: 'Faktur berhasil ditandai lunas.' });
+  } catch (err) {
+    console.error('Pay invoice error:', err);
+    res.status(500).json({ error: 'Gagal memproses pembayaran.' });
+  }
+});
+
+// ============================================================
+// PURCHASE ORDER CRUD — parameterized routes AFTER named routes
+// ============================================================
+
 // POST /api/purchase-orders
 router.post('/', verifyToken, (req, res) => {
   try {
@@ -246,252 +504,6 @@ router.put('/:id/status', verifyToken, (req, res) => {
   } catch (err) {
     console.error('Update PO status error:', err);
     res.status(500).json({ error: 'Gagal mengubah status PO.' });
-  }
-});
-
-// POST /api/goods-receipts
-router.post('/goods-receipts', verifyToken, (req, res) => {
-  try {
-    const db = getDb();
-    const { purchase_order_id, received_date, notes, items } = req.body;
-
-    if (!purchase_order_id) {
-      return res.status(400).json({ error: 'Purchase Order harus dipilih.' });
-    }
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ error: 'Minimal satu item harus diisi.' });
-    }
-
-    const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(purchase_order_id);
-    if (!po) {
-      return res.status(404).json({ error: 'Purchase Order tidak ditemukan.' });
-    }
-
-    const id = uuidv4();
-    const now = new Date().toISOString();
-
-    const count = db.prepare('SELECT COUNT(*) as count FROM goods_receipts').get();
-    const receiptNumber = `GR-${now.split('T')[0].replace(/-/g, '')}-${String(count.count + 1).padStart(4, '0')}`;
-
-    const transaction = db.transaction(() => {
-      // Create goods receipt
-      db.prepare(`
-        INSERT INTO goods_receipts (id, purchase_order_id, receipt_number, received_date, received_by, notes, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, purchase_order_id, receiptNumber, received_date || now, req.user.id, notes || null, now);
-
-      const insertGrItem = db.prepare(`
-        INSERT INTO goods_receipt_items (id, goods_receipt_id, product_id, product_batch_id, qty_received, unit_price)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `);
-
-      const upsertBatch = db.prepare(`
-        INSERT INTO product_batches (id, product_id, batch_number, manufacture_date, expiry_date, purchase_price, qty_on_hand, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
-        ON CONFLICT(product_id, batch_number) DO UPDATE SET
-          qty_on_hand = qty_on_hand + ?,
-          purchase_price = ?,
-          updated_at = ?
-      `);
-
-      const insertMovement = db.prepare(`
-        INSERT INTO stock_movements (id, product_id, product_batch_id, movement_type, reference_type, reference_id, qty_in, qty_out, unit_cost, notes, created_by, created_at)
-        VALUES (?, ?, ?, 'in', 'goods_receipt', ?, ?, 0, ?, ?, ?, ?)
-      `);
-
-      const updatePoItem = db.prepare(`
-        UPDATE purchase_order_items SET qty_received = qty_received + ?
-        WHERE purchase_order_id = ? AND product_id = ?
-      `);
-
-      for (const item of items) {
-        const { product_id, batch_number, manufacture_date, expiry_date, qty_received, unit_price } = item;
-
-        if (!product_id || !batch_number || !qty_received) {
-          throw new Error('product_id, batch_number, dan qty_received harus diisi.');
-        }
-
-        // Check if batch exists
-        let batchId;
-        const existingBatch = db.prepare('SELECT id FROM product_batches WHERE product_id = ? AND batch_number = ?').get(product_id, batch_number);
-
-        if (existingBatch) {
-          batchId = existingBatch.id;
-        } else {
-          batchId = uuidv4();
-        }
-
-        // Upsert batch
-        upsertBatch.run(
-          batchId, product_id, batch_number,
-          manufacture_date || null, expiry_date || null,
-          unit_price || 0, qty_received, now, now,
-          qty_received, unit_price || 0, now
-        );
-
-        // Create GR item
-        insertGrItem.run(uuidv4(), id, product_id, batchId, qty_received, unit_price || 0);
-
-        // Create stock movement
-        insertMovement.run(uuidv4(), product_id, batchId, id, qty_received, unit_price || 0, `Penerimaan barang: ${receiptNumber}`, req.user.id, now);
-
-        // Update PO item qty_received
-        updatePoItem.run(qty_received, purchase_order_id, product_id);
-      }
-
-      // Check if PO is fully received
-      const poItems = db.prepare('SELECT * FROM purchase_order_items WHERE purchase_order_id = ?').all(purchase_order_id);
-      const allReceived = poItems.every(item => item.qty_received >= item.qty_ordered);
-      const someReceived = poItems.some(item => item.qty_received > 0);
-
-      if (allReceived) {
-        db.prepare('UPDATE purchase_orders SET status = ?, updated_at = ? WHERE id = ?').run('completed', now, purchase_order_id);
-      } else if (someReceived) {
-        db.prepare('UPDATE purchase_orders SET status = ?, updated_at = ? WHERE id = ?').run('partial', now, purchase_order_id);
-      }
-    });
-
-    transaction();
-
-    // Set due_date on PO to 30 days from received_date if not already set
-    const receivedDate = received_date || now;
-    const dueDate = new Date(new Date(receivedDate).getTime() + 30*24*60*60*1000).toISOString().split('T')[0];
-    db.prepare('UPDATE purchase_orders SET due_date = COALESCE(due_date, ?), updated_at = ? WHERE id = ?')
-      .run(dueDate, now, purchase_order_id);
-    db._save();
-
-    const gr = db.prepare('SELECT * FROM goods_receipts WHERE id = ?').get(id);
-    logAudit(req.user?.id, 'create_goods_receipt', 'goods_receipt', id, { receipt_number: receiptNumber, purchase_order_id });
-    res.status(201).json(gr);
-  } catch (err) {
-    console.error('Create GR error:', err);
-    res.status(500).json({ error: err.message || 'Gagal membuat penerimaan barang.' });
-  }
-});
-
-// GET /api/goods-receipts
-router.get('/goods-receipts', verifyToken, (req, res) => {
-  try {
-    const db = getDb();
-    const receipts = db.prepare(`
-      SELECT gr.*, po.po_number, s.name as supplier_name, u.full_name as received_by_name
-      FROM goods_receipts gr
-      LEFT JOIN purchase_orders po ON po.id = gr.purchase_order_id
-      LEFT JOIN suppliers s ON s.id = po.supplier_id
-      LEFT JOIN users u ON u.id = gr.received_by
-      ORDER BY gr.created_at DESC
-    `).all();
-
-    res.json(receipts);
-  } catch (err) {
-    console.error('List GR error:', err);
-    res.status(500).json({ error: 'Gagal memuat daftar penerimaan barang.' });
-  }
-});
-
-// GET /api/invoices — list purchase invoices
-router.get('/invoices', verifyToken, (req, res) => {
-  try {
-    const db = getDb();
-    const invoices = db.prepare(`
-      SELECT po.id, po.po_number, po.order_date, po.status, po.total_amount,
-             po.payment_status, po.due_date, po.paid_at,
-             s.name as supplier_name,
-             gr.receipt_number, gr.received_date
-      FROM purchase_orders po
-      LEFT JOIN suppliers s ON s.id = po.supplier_id
-      LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
-      WHERE po.status IN ('completed', 'partial')
-      ORDER BY po.created_at DESC
-    `).all();
-
-    // Compute effective payment_status
-    const now = new Date();
-    const result = invoices.map(inv => {
-      let paymentStatus = inv.payment_status || 'unpaid';
-      const dueDate = inv.due_date || (inv.received_date ? new Date(new Date(inv.received_date).getTime() + 30*24*60*60*1000).toISOString().split('T')[0] : null);
-      
-      if (paymentStatus !== 'paid' && dueDate && new Date(dueDate) < now) {
-        paymentStatus = 'overdue';
-      }
-      
-      return {
-        ...inv,
-        payment_status: paymentStatus,
-        due_date: dueDate,
-        received_date: inv.received_date || inv.order_date,
-      };
-    });
-
-    res.json(result);
-  } catch (err) {
-    console.error('List invoices error:', err);
-    res.status(500).json({ error: 'Gagal memuat daftar faktur.' });
-  }
-});
-
-// GET /api/invoices/stats
-router.get('/invoices/stats', verifyToken, (req, res) => {
-  try {
-    const db = getDb();
-
-    const allInvoices = db.prepare(`
-      SELECT po.total_amount, po.payment_status, po.due_date, po.paid_at, po.order_date,
-             gr.received_date
-      FROM purchase_orders po
-      LEFT JOIN goods_receipts gr ON gr.purchase_order_id = po.id
-      WHERE po.status IN ('completed', 'partial')
-    `).all();
-
-    const now = new Date();
-    const thisMonth = now.toISOString().slice(0, 7); // YYYY-MM
-    
-    let totalDebt = 0;
-    let unpaidCount = 0;
-    let overdueCount = 0;
-    let paidThisMonth = 0;
-
-    for (const inv of allInvoices) {
-      const status = inv.payment_status || 'unpaid';
-      const dueDate = inv.due_date || (inv.received_date ? new Date(new Date(inv.received_date).getTime() + 30*24*60*60*1000).toISOString().split('T')[0] : null);
-
-      if (status === 'paid') {
-        if (inv.paid_at && inv.paid_at.slice(0, 7) === thisMonth) {
-          paidThisMonth += inv.total_amount || 0;
-        }
-      } else {
-        totalDebt += inv.total_amount || 0;
-        unpaidCount++;
-        if (dueDate && new Date(dueDate) < now) {
-          overdueCount++;
-        }
-      }
-    }
-
-    res.json({ totalDebt, unpaidCount, overdueCount, paidThisMonth });
-  } catch (err) {
-    console.error('Invoice stats error:', err);
-    res.status(500).json({ error: 'Gagal memuat statistik faktur.' });
-  }
-});
-
-// PUT /api/invoices/:id/pay — mark invoice as paid
-router.put('/invoices/:id/pay', verifyToken, (req, res) => {
-  try {
-    const db = getDb();
-    const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(req.params.id);
-    if (!po) {
-      return res.status(404).json({ error: 'Faktur tidak ditemukan.' });
-    }
-    const now = new Date().toISOString();
-    db.prepare('UPDATE purchase_orders SET payment_status = ?, paid_at = ?, updated_at = ? WHERE id = ?')
-      .run('paid', now, now, req.params.id);
-    
-    logAudit(req.user?.id, 'pay_invoice', 'purchase_order', req.params.id, { po_number: po.po_number });
-    res.json({ message: 'Faktur berhasil ditandai lunas.' });
-  } catch (err) {
-    console.error('Pay invoice error:', err);
-    res.status(500).json({ error: 'Gagal memproses pembayaran.' });
   }
 });
 
