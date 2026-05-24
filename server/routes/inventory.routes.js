@@ -214,28 +214,47 @@ router.post('/adjust', verifyToken, (req, res) => {
       insertAdjustment.run(adjustmentId, adjNumber, reason, notes || null, req.user.id, now);
 
       for (const item of items) {
-        const { product_id, product_batch_id, qty_after } = item;
+        const { product_id, qty_after } = item;
+        let { product_batch_id } = item;
 
         if (!product_id || qty_after === undefined) {
           throw new Error('product_id dan qty_after harus diisi untuk setiap item.');
         }
 
-        let batch = null;
-        let qtyBefore = 0;
+        // Get all active batches for this product
+        const allBatches = db.prepare(
+          'SELECT * FROM product_batches WHERE product_id = ? AND status = ? ORDER BY expiry_date ASC'
+        ).all(product_id, 'active');
 
+        // Calculate total current stock
+        const totalCurrentStock = allBatches.reduce((sum, b) => sum + (b.qty_on_hand || 0), 0);
+        const qtyBefore = item.qty_before !== undefined ? item.qty_before : totalCurrentStock;
+        const qtyDiff = qty_after - qtyBefore;
+
+        // If specific batch provided, use it
+        let batch = null;
         if (product_batch_id) {
           batch = db.prepare('SELECT * FROM product_batches WHERE id = ?').get(product_batch_id);
           if (!batch) throw new Error(`Batch ${product_batch_id} tidak ditemukan.`);
-          qtyBefore = batch.qty_on_hand;
+        } else if (allBatches.length > 0) {
+          // Auto-select: for decrease use FEFO (first expiry), for increase use last batch
+          batch = qtyDiff < 0 ? allBatches[0] : allBatches[allBatches.length - 1];
+          product_batch_id = batch.id;
         }
 
-        const qtyDiff = qty_after - qtyBefore;
         const itemId = uuidv4();
-
         insertItem.run(itemId, adjustmentId, product_id, product_batch_id || null, qtyBefore, qty_after, qtyDiff);
 
-        if (product_batch_id && batch) {
-          updateBatch.run(qty_after, now, product_batch_id);
+        // Update batch qty
+        if (batch && product_batch_id) {
+          if (allBatches.length === 1) {
+            // Single batch — set directly to qty_after
+            updateBatch.run(qty_after, now, product_batch_id);
+          } else {
+            // Multiple batches — apply the difference to the selected batch
+            const newBatchQty = Math.max(0, batch.qty_on_hand + qtyDiff);
+            updateBatch.run(newBatchQty, now, product_batch_id);
+          }
         }
 
         // Create stock movement
@@ -255,6 +274,7 @@ router.post('/adjust', verifyToken, (req, res) => {
     });
 
     transaction();
+    db._save();
 
     res.status(201).json({
       id: adjustmentId,
