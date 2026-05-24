@@ -27,14 +27,14 @@ export default function Invoices() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [invoicesRes, statsRes] = await Promise.all([
-        api.get<Invoice[]>('/invoices'),
-        api.get<InvoiceStats>('/invoices/stats').catch(() => ({ totalDebt: 0, unpaidCount: 0, overdueCount: 0, paidThisMonth: 0 })),
-      ])
-      setInvoices(Array.isArray(invoicesRes) ? invoicesRes : (invoicesRes as any).data ?? [])
+      const invoicesRes = await api.get<any>('/invoices')
+      setInvoices(Array.isArray(invoicesRes) ? invoicesRes : (invoicesRes as any)?.data ?? [])
+    } catch (e) { console.error('Failed to load invoices:', e) }
+    try {
+      const statsRes = await api.get<InvoiceStats>('/invoices/stats')
       setStats(statsRes)
-    } catch { /* silently */ }
-    finally { setLoading(false) }
+    } catch { /* stats optional */ }
+    setLoading(false)
   }, [])
 
   useEffect(() => { loadData() }, [loadData])

@@ -32,14 +32,14 @@ export default function Adjustments() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [adjRes, prodRes] = await Promise.all([
-        api.get<StockAdjustment[]>('/inventory/adjustments').catch(() => []),
-        api.get<Product[]>('/products'),
-      ])
-      setAdjustments(Array.isArray(adjRes) ? adjRes : (adjRes as any).data ?? [])
-      setProducts(Array.isArray(prodRes) ? prodRes : (prodRes as any).data ?? [])
-    } catch { /* silently */ }
-    finally { setLoading(false) }
+      const adjRes = await api.get<any>('/inventory/adjustments')
+      setAdjustments(Array.isArray(adjRes) ? adjRes : (adjRes as any)?.data ?? [])
+    } catch (e) { console.error('Failed to load adjustments:', e) }
+    try {
+      const prodRes = await api.get<any>('/products', { limit: 500 })
+      setProducts(Array.isArray(prodRes) ? prodRes : (prodRes as any)?.data ?? [])
+    } catch (e) { console.error('Failed to load products:', e) }
+    setLoading(false)
   }, [])
 
   useEffect(() => { loadData() }, [loadData])

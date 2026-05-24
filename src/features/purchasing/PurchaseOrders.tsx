@@ -37,16 +37,18 @@ export default function PurchaseOrders() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [ordersRes, supRes, prodRes] = await Promise.all([
-        api.get<any>('/purchase-orders'),
-        api.get<Supplier[]>('/suppliers'),
-        api.get<Product[]>('/products'),
-      ])
-      setOrders(Array.isArray(ordersRes) ? ordersRes : ordersRes.data ?? [])
-      setSuppliers(Array.isArray(supRes) ? supRes : (supRes as any).data ?? [])
-      setProducts(Array.isArray(prodRes) ? prodRes : (prodRes as any).data ?? [])
-    } catch { /* silently */ }
-    finally { setLoading(false) }
+      const ordersRes = await api.get<any>('/purchase-orders', { limit: 500 })
+      setOrders(Array.isArray(ordersRes) ? ordersRes : ordersRes?.data ?? [])
+    } catch (e) { console.error('Failed to load POs:', e) }
+    try {
+      const supRes = await api.get<any>('/suppliers')
+      setSuppliers(Array.isArray(supRes) ? supRes : (supRes as any)?.data ?? [])
+    } catch (e) { console.error('Failed to load suppliers:', e) }
+    try {
+      const prodRes = await api.get<any>('/products', { limit: 500 })
+      setProducts(Array.isArray(prodRes) ? prodRes : (prodRes as any)?.data ?? [])
+    } catch (e) { console.error('Failed to load products:', e) }
+    setLoading(false)
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
