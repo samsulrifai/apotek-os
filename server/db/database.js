@@ -416,11 +416,16 @@ async function initializeDatabase() {
     'ALTER TABLE purchase_orders ADD COLUMN payment_status TEXT DEFAULT \'unpaid\'',
     'ALTER TABLE purchase_orders ADD COLUMN due_date TEXT',
     'ALTER TABLE purchase_orders ADD COLUMN paid_at TEXT',
-    'CREATE TABLE IF NOT EXISTS sales_returns (id TEXT PRIMARY KEY, sale_id TEXT NOT NULL, return_number TEXT UNIQUE NOT NULL, reason TEXT, notes TEXT, total_refund REAL DEFAULT 0, status TEXT DEFAULT "completed", created_by TEXT, created_at TEXT DEFAULT (datetime("now")), FOREIGN KEY (sale_id) REFERENCES sales(id), FOREIGN KEY (created_by) REFERENCES users(id))',
+    'CREATE TABLE IF NOT EXISTS sales_returns (id TEXT PRIMARY KEY, sale_id TEXT NOT NULL, return_number TEXT UNIQUE NOT NULL, reason TEXT, notes TEXT, total_refund REAL DEFAULT 0, status TEXT DEFAULT \'completed\', created_by TEXT, created_at TEXT, FOREIGN KEY (sale_id) REFERENCES sales(id), FOREIGN KEY (created_by) REFERENCES users(id))',
     'CREATE TABLE IF NOT EXISTS sales_return_items (id TEXT PRIMARY KEY, sales_return_id TEXT NOT NULL, sale_item_id TEXT, product_id TEXT, qty_returned INTEGER, unit_price REAL DEFAULT 0, subtotal REAL DEFAULT 0, FOREIGN KEY (sales_return_id) REFERENCES sales_returns(id), FOREIGN KEY (product_id) REFERENCES products(id))',
   ];
   for (const sql of migrations) {
-    try { database.exec(sql); } catch (e) { /* column already exists */ }
+    try { database.exec(sql); } catch (e) { 
+      // Only log if it's NOT the expected "duplicate column" error
+      if (!e.message?.includes('duplicate column')) {
+        console.warn('Migration warning:', e.message, '| SQL:', sql.substring(0, 60));
+      }
+    }
   }
   database._save();
 

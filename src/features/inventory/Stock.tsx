@@ -32,17 +32,16 @@ export default function Stock() {
   const loadData = async () => {
     setLoading(true)
     try {
-      const [items, statsData] = await Promise.all([
-        api.get<StockItem[]>('/inventory/stock'),
-        api.get<StockStats>('/inventory/stats').catch(() => ({ totalItems: 0, inventoryValue: 0, criticalStock: 0, expiringBatches: 0 })),
-      ])
-      setStockItems(Array.isArray(items) ? items : (items as any).data ?? [])
-      setStats(statsData)
-    } catch {
-      // handle silently
+      const items = await api.get<any>('/inventory/stock')
+      setStockItems(Array.isArray(items) ? items : items?.data ?? [])
     } finally {
       setLoading(false)
     }
+    // Fetch stats separately
+    try {
+      const statsData = await api.get<StockStats>('/inventory/stats')
+      setStats(statsData)
+    } catch { /* stats optional */ }
   }
 
   const getStatusLabel = (item: StockItem) => {
@@ -235,7 +234,7 @@ export default function Stock() {
                     </TableCell>
                     <TableCell className="text-slate-600">{item.category_name || '-'}</TableCell>
                     <TableCell className="text-center font-bold">{item.total_stock}</TableCell>
-                    <TableCell className="text-center text-slate-500">{item.unit_symbol}</TableCell>
+                    <TableCell className="text-center text-slate-500">{item.unit_symbol || '-'}</TableCell>
                     <TableCell className="text-center">
                       {getStatusBadge(item)}
                     </TableCell>

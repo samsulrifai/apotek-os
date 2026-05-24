@@ -9,7 +9,7 @@ const { logAudit } = require('../middleware/auditLog');
 router.get('/stock', verifyToken, (req, res) => {
   try {
     const db = getDb();
-    const { search, category_id, stock_status, page = 1, limit = 20 } = req.query;
+    const { search, category_id, stock_status, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
     const conditions = ['p.is_active = 1'];
@@ -48,8 +48,9 @@ router.get('/stock', verifyToken, (req, res) => {
     `).get(...params);
 
     const items = db.prepare(`
-      SELECT p.id, p.sku, p.name, p.generic_name, p.min_stock, p.selling_price, p.default_purchase_price,
-             c.name as category_name, u.name as unit_name,
+      SELECT p.id as product_id, p.sku, p.name as product_name, p.generic_name, 
+             p.min_stock, p.selling_price, p.default_purchase_price, p.drug_class,
+             c.name as category_name, u.name as unit_name, u.symbol as unit_symbol,
              COALESCE(SUM(pb.qty_on_hand), 0) as total_stock,
              COUNT(pb.id) as batch_count
       FROM products p
@@ -63,15 +64,30 @@ router.get('/stock', verifyToken, (req, res) => {
       LIMIT ? OFFSET ?
     `).all(...params, parseInt(limit), offset);
 
-    res.json({
-      data: items,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: total.count,
-        totalPages: Math.ceil(total.count / parseInt(limit))
-      }
+    // Enrich each item with status and batches
+    const enriched = items.map(item => {
+      let status = 'normal';
+      if (item.total_stock === 0) status = 'empty';
+      else if (item.min_stock > 0 && item.total_stock <= item.min_stock) status = 'critical';
+      else if (item.min_stock > 0 && item.total_stock <= item.min_stock * 1.5) status = 'low';
+
+      // Get batches for this product
+      const batches = db.prepare(`
+        SELECT id, batch_number, expiry_date, qty_on_hand, purchase_price, manufacture_date, status
+        FROM product_batches
+        WHERE product_id = ? AND status = 'active' AND qty_on_hand > 0
+        ORDER BY expiry_date ASC
+      `).all(item.product_id);
+
+      return {
+        ...item,
+        unit_symbol: item.unit_symbol || item.unit_name || '-',
+        status,
+        batches
+      };
     });
+
+    res.json(enriched);
   } catch (err) {
     console.error('Inventory stock error:', err);
     res.status(500).json({ error: 'Gagal memuat data stok.' });
