@@ -268,7 +268,7 @@ export default function Adjustments() {
             ) : detailData ? (
               <>
                 {/* Info Header */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5">
                     <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">No. Penyesuaian</p>
                     <p className="text-sm font-bold text-slate-800 font-mono mt-1">{detailData.adjustment_number}</p>
@@ -463,7 +463,7 @@ export default function Adjustments() {
                             className="mt-1"
                           />
                         </div>
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                           <div>
                             <Label className="text-xs text-slate-500 font-medium">Stok Saat Ini</Label>
                             <Input type="number" value={item.qty_before} disabled className="mt-1 bg-slate-50 text-slate-500" />

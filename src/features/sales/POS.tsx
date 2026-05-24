@@ -162,7 +162,7 @@ export default function POS() {
   const displayProducts = filteredProducts
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-[calc(100vh-8rem)] animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="flex-1 flex flex-col lg:h-full lg:min-h-[calc(100vh-8rem)] animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4 shrink-0">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
@@ -187,10 +187,10 @@ export default function POS() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 lg:min-h-0">
         
         {/* KIRI: Pencarian & Daftar Produk */}
-        <div className="lg:col-span-7 flex flex-col gap-4 min-h-0">
+        <div className="lg:col-span-7 flex flex-col gap-4 min-h-[500px] lg:min-h-0">
           <Card className="shrink-0 border-none shadow-sm">
             <CardContent className="p-4">
               <div className="flex gap-3">
@@ -274,7 +274,7 @@ export default function POS() {
         </div>
 
         {/* KANAN: Keranjang & Pembayaran */}
-        <div className="lg:col-span-5 flex flex-col min-h-0 h-full">
+        <div className="lg:col-span-5 flex flex-col min-h-[500px] lg:min-h-0 lg:h-full">
           <Card className="flex-1 border-none shadow-md overflow-hidden flex flex-col bg-white">
             
             {/* Cart Header */}

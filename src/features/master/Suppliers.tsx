@@ -192,7 +192,7 @@ export default function Suppliers() {
               {editingItem ? 'Edit Supplier' : 'Tambah Supplier Baru'}
             </DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 py-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-4">
             <div className="col-span-2">
               <Label className="text-slate-700 font-semibold text-sm">Nama PBF *</Label>
               <Input value={form.name} onChange={e => setForm({...form, name: e.target.value})} placeholder="PT ..." className="mt-1.5" />

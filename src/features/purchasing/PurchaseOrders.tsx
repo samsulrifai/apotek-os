@@ -345,7 +345,7 @@ export default function PurchaseOrders() {
                             className="mt-1"
                           />
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <Label className="text-xs text-slate-500 font-medium">Jumlah (Qty)</Label>
                             <Input type="number" value={item.qty_ordered} onChange={e => updateItem(idx, { qty_ordered: parseInt(e.target.value) || 0 })} className="mt-1" min={1} />
@@ -411,7 +411,7 @@ export default function PurchaseOrders() {
             ) : detailPO ? (
               <div className="space-y-5">
                 {/* Header Info */}
-                <div className="grid grid-cols-2 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
                   <div>
                     <p className="text-xs text-slate-400 font-medium">Nomor SP</p>
                     <p className="font-bold text-slate-800 font-mono">{detailPO.po_number}</p>
