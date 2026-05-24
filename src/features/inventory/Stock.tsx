@@ -208,6 +208,7 @@ export default function Stock() {
               <TableRow className="hover:bg-transparent">
                 <DataTableColumnHeader title="SKU" filterValue={getFilter('sku')} onFilterChange={v => setFilter('sku', v)} />
                 <DataTableColumnHeader title="Produk" filterValue={getFilter('product_name')} onFilterChange={v => setFilter('product_name', v)} />
+                <DataTableColumnHeader title="Pabrik" filterValue={getFilter('manufacturer')} onFilterChange={v => setFilter('manufacturer', v)} />
                 <DataTableColumnHeader title="Kategori" filterValue={getFilter('category_name')} onFilterChange={v => setFilter('category_name', v)} />
                 <DataTableColumnHeader title="Stok Tersedia" hideFilter align="center" />
                 <DataTableColumnHeader title="Satuan" hideFilter align="center" />
@@ -218,7 +219,7 @@ export default function Stock() {
             <TableBody>
               {paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-slate-400">
+                  <TableCell colSpan={8} className="text-center py-8 text-slate-400">
                     {globalSearch || Object.values(columnFilters).some(Boolean) ? 'Tidak ada hasil pencarian' : 'Belum ada data stok'}
                   </TableCell>
                 </TableRow>
@@ -232,6 +233,7 @@ export default function Stock() {
                         <p className="text-xs font-mono text-slate-500 mt-0.5">Batch: {item.batches[0].batch_number}</p>
                       )}
                     </TableCell>
+                    <TableCell className="text-slate-600 text-sm">{(item as any).manufacturer || '-'}</TableCell>
                     <TableCell className="text-slate-600">{item.category_name || '-'}</TableCell>
                     <TableCell className="text-center font-bold">{item.total_stock}</TableCell>
                     <TableCell className="text-center text-slate-500">{item.unit_symbol || '-'}</TableCell>

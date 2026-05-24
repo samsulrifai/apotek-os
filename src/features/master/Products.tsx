@@ -253,6 +253,7 @@ export default function Products() {
             <TableHeader className="bg-slate-50/80">
               <TableRow className="hover:bg-transparent">
                 <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Produk</span></TableHead>
+                <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Pabrik</span></TableHead>
                 <TableHead><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">Golongan</span></TableHead>
                 <TableHead className="text-right"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">HNA</span></TableHead>
                 <TableHead className="text-right"><span className="font-bold text-slate-500 text-xs uppercase tracking-wider">HNA+PPN</span></TableHead>
@@ -265,7 +266,7 @@ export default function Products() {
             <TableBody>
               {paginatedData.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12 text-slate-400">
+                  <TableCell colSpan={9} className="text-center py-12 text-slate-400">
                     {globalSearch ? 'Tidak ada hasil pencarian' : 'Belum ada produk'}
                   </TableCell>
                 </TableRow>
@@ -290,6 +291,9 @@ export default function Products() {
                           )}
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <span className="text-sm text-slate-600">{item.manufacturer || '-'}</span>
                     </TableCell>
                     <TableCell className="py-3">
                       <Badge variant="outline" className={`font-medium shadow-none text-xs ${DRUG_CLASS_COLORS[item.drug_class] || 'bg-slate-50 text-slate-600'}`}>

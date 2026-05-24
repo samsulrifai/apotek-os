@@ -49,7 +49,7 @@ router.get('/stock', verifyToken, (req, res) => {
 
     const items = db.prepare(`
       SELECT p.id as product_id, p.sku, p.name as product_name, p.generic_name, 
-             p.min_stock, p.selling_price, p.default_purchase_price, p.drug_class,
+             p.min_stock, p.selling_price, p.default_purchase_price, p.drug_class, p.manufacturer,
              c.name as category_name, u.name as unit_name, u.symbol as unit_symbol,
              COALESCE(SUM(pb.qty_on_hand), 0) as total_stock,
              COUNT(pb.id) as batch_count
