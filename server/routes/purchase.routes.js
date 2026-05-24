@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/purchase-orders
 router.get('/', verifyToken, (req, res) => {
@@ -117,6 +118,7 @@ router.post('/', verifyToken, (req, res) => {
     transaction();
 
     const po = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_purchase_order', 'purchase_order', id, { po_number: poNumber, supplier_id });
     res.status(201).json(po);
   } catch (err) {
     console.error('Create PO error:', err);
@@ -359,6 +361,7 @@ router.post('/goods-receipts', verifyToken, (req, res) => {
     db._save();
 
     const gr = db.prepare('SELECT * FROM goods_receipts WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_goods_receipt', 'goods_receipt', id, { receipt_number: receiptNumber, purchase_order_id });
     res.status(201).json(gr);
   } catch (err) {
     console.error('Create GR error:', err);
@@ -484,6 +487,7 @@ router.put('/invoices/:id/pay', verifyToken, (req, res) => {
     db.prepare('UPDATE purchase_orders SET payment_status = ?, paid_at = ?, updated_at = ? WHERE id = ?')
       .run('paid', now, now, req.params.id);
     
+    logAudit(req.user?.id, 'pay_invoice', 'purchase_order', req.params.id, { po_number: po.po_number });
     res.json({ message: 'Faktur berhasil ditandai lunas.' });
   } catch (err) {
     console.error('Pay invoice error:', err);

@@ -2,10 +2,12 @@ import { createBrowserRouter, Navigate, Outlet } from "react-router-dom"
 import { lazy, Suspense } from "react"
 import DashboardLayout from "../layouts/DashboardLayout"
 import Login from "@/features/auth/Login"
+import { RoleGuard } from "@/app/guards/RoleGuard"
 
 // Lazy-load all feature pages
 const Dashboard = lazy(() => import("@/features/dashboard/Dashboard"))
 const POS = lazy(() => import("@/features/sales/POS"))
+const SalesReturn = lazy(() => import("@/features/sales/SalesReturn"))
 const Stock = lazy(() => import("@/features/inventory/Stock"))
 const Adjustments = lazy(() => import("@/features/inventory/Adjustments"))
 const Products = lazy(() => import("@/features/master/Products"))
@@ -63,6 +65,10 @@ export const router = createBrowserRouter([
             path: "sales/pos",
             element: <POS />,
           },
+          {
+            path: "sales/returns",
+            element: <SalesReturn />,
+          },
           // Inventory
           {
             path: "inventory/stock",
@@ -115,17 +121,23 @@ export const router = createBrowserRouter([
             path: "reports/expiries",
             element: <ExpiryReport />,
           },
-          // Settings
+          // Settings (admin only)
           {
-            path: "settings/general",
-            element: <GeneralSettings />,
-          },
-          {
-            path: "settings/users",
-            element: <UserManagement />,
+            element: <RoleGuard allowedRoles={['admin']} />,
+            children: [
+              {
+                path: "settings/general",
+                element: <GeneralSettings />,
+              },
+              {
+                path: "settings/users",
+                element: <UserManagement />,
+              },
+            ],
           },
         ],
       },
     ],
   },
 ])
+

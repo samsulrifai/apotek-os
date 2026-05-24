@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/inventory/stock — products with total stock
 router.get('/stock', verifyToken, (req, res) => {
@@ -244,6 +245,7 @@ router.post('/adjust', verifyToken, (req, res) => {
       adjustment_number: adjNumber,
       message: 'Penyesuaian stok berhasil.'
     });
+    logAudit(req.user?.id, 'create_adjustment', 'stock_adjustment', adjustmentId, { adjustment_number: adjNumber, reason });
   } catch (err) {
     console.error('Stock adjustment error:', err);
     res.status(500).json({ error: err.message || 'Gagal melakukan penyesuaian stok.' });

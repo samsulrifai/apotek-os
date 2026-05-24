@@ -1,10 +1,14 @@
+import { useState } from "react"
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom"
 import {
   LayoutDashboard, ShoppingCart, Package, Pill, Settings, LogOut,
   Receipt, FileText, Box, FolderTree, Truck, Ruler, Users,
-  ClipboardList, PackageCheck, BarChart3, AlertTriangle, Sliders
+  ClipboardList, PackageCheck, BarChart3, AlertTriangle, Sliders,
+  RotateCcw, Lock, ChevronDown, Sun, Moon, Monitor
 } from "lucide-react"
 import { useAuth } from "@/app/providers/AuthProvider"
+import { useTheme } from "@/app/providers/ThemeProvider"
+import { ChangePasswordDialog } from "@/components/ChangePasswordDialog"
 
 import {
   Sidebar,
@@ -22,6 +26,13 @@ import {
   SidebarInset,
 } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 const data = {
   navMain: [
@@ -30,6 +41,12 @@ const data = {
       items: [
         { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
         { title: "POS Kasir", url: "/sales/pos", icon: ShoppingCart },
+      ],
+    },
+    {
+      title: "Penjualan",
+      items: [
+        { title: "Retur Penjualan", url: "/sales/returns", icon: RotateCcw },
       ],
     },
     {
@@ -78,6 +95,14 @@ export default function DashboardLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
+  const { theme, setTheme } = useTheme()
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false)
+
+  const nextTheme = () => {
+    if (theme === 'light') setTheme('dark')
+    else if (theme === 'dark') setTheme('system')
+    else setTheme('light')
+  }
 
   const handleLogout = () => {
     logout()
@@ -138,12 +163,44 @@ export default function DashboardLayout() {
               Halo, {displayName}
               {displayRole && <span className="ml-1 text-xs opacity-60">({displayRole})</span>}
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={nextTheme}
+                className="h-9 w-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                title={`Theme: ${theme}`}
+              >
+                {theme === 'light' && <Sun className="h-4 w-4 text-amber-500" />}
+                {theme === 'dark' && <Moon className="h-4 w-4 text-blue-400" />}
+                {theme === 'system' && <Monitor className="h-4 w-4 text-slate-500 dark:text-slate-400" />}
+              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-800 outline-none cursor-pointer">
+                  <div className="h-8 w-8 rounded-full bg-teal-100 flex items-center justify-center text-teal-700 font-bold text-xs">
+                    {displayName.charAt(0).toUpperCase()}
+                  </div>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => setChangePasswordOpen(true)} className="cursor-pointer">
+                    <Lock className="mr-2 h-4 w-4" />
+                    Ubah Password
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Logout
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-x-hidden overflow-y-auto bg-slate-50/50 flex flex-col">
+        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-x-hidden overflow-y-auto bg-slate-50/50 dark:bg-slate-900/50 flex flex-col">
           <Outlet />
         </main>
       </SidebarInset>
+
+      <ChangePasswordDialog open={changePasswordOpen} onOpenChange={setChangePasswordOpen} />
     </SidebarProvider>
   )
 }

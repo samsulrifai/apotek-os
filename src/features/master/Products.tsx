@@ -15,6 +15,7 @@ import { DRUG_CLASS_LABELS, DRUG_CLASS_COLORS } from "@/types"
 import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
 import { useToast } from "@/hooks/use-toast"
+import { PageSkeleton } from "@/components/ui/PageSkeleton"
 
 interface ProductStats { total: number; byDrugClass: Record<string, number> }
 
@@ -171,14 +172,7 @@ export default function Products() {
   }
 
   if (loading) {
-    return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-          <p className="text-sm text-muted-foreground">Memuat data produk...</p>
-        </div>
-      </div>
-    )
+    return <PageSkeleton />
   }
 
   return (

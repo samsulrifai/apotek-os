@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/suppliers
 router.get('/', verifyToken, (req, res) => {
@@ -45,6 +46,7 @@ router.post('/', verifyToken, (req, res) => {
     `).run(id, name, phone || null, email || null, address || null, contact_person || null, now, now);
 
     const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_supplier', 'supplier', id, { name });
     res.status(201).json(supplier);
   } catch (err) {
     console.error('Create supplier error:', err);
@@ -81,6 +83,7 @@ router.put('/:id', verifyToken, (req, res) => {
     );
 
     const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(req.params.id);
+    logAudit(req.user?.id, 'update_supplier', 'supplier', req.params.id, { name: name || existing.name });
     res.json(supplier);
   } catch (err) {
     console.error('Update supplier error:', err);
@@ -101,6 +104,7 @@ router.delete('/:id', verifyToken, (req, res) => {
     db.prepare('UPDATE suppliers SET is_active = 0, updated_at = ? WHERE id = ?')
       .run(new Date().toISOString(), req.params.id);
 
+    logAudit(req.user?.id, 'delete_supplier', 'supplier', req.params.id, { name: existing.name });
     res.json({ message: 'Supplier berhasil dinonaktifkan.' });
   } catch (err) {
     console.error('Delete supplier error:', err);

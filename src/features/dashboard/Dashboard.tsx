@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Pill, DollarSign, Users, AlertTriangle, TrendingUp, Clock, LayoutDashboard, ShoppingCart, Loader2 } from "lucide-react"
+import { Pill, DollarSign, Users, AlertTriangle, TrendingUp, Clock, LayoutDashboard, ShoppingCart } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { 
@@ -9,6 +9,7 @@ import {
 } from "recharts"
 import { api } from "@/lib/api"
 import { useAuth } from "@/app/providers/AuthProvider"
+import { PageSkeleton } from "@/components/ui/PageSkeleton"
 import type { DashboardSummary } from "@/types"
 
 export default function Dashboard() {
@@ -26,14 +27,7 @@ export default function Dashboard() {
   }, [])
 
   if (loading) {
-    return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-          <p className="text-sm text-muted-foreground">Memuat dashboard...</p>
-        </div>
-      </div>
-    )
+    return <PageSkeleton />
   }
 
   const salesTrend = data?.salesTrend?.map(s => ({

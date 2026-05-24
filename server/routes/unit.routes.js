@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/units
 router.get('/', verifyToken, (req, res) => {
@@ -36,6 +37,7 @@ router.post('/', verifyToken, (req, res) => {
     db.prepare('INSERT INTO units (id, name, symbol) VALUES (?, ?, ?)').run(id, name, symbol || null);
 
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_unit', 'unit', id, { name });
     res.status(201).json(unit);
   } catch (err) {
     console.error('Create unit error:', err);
@@ -62,6 +64,7 @@ router.put('/:id', verifyToken, (req, res) => {
     db.prepare('UPDATE units SET name = ?, symbol = ? WHERE id = ?').run(name, symbol || null, req.params.id);
 
     const unit = db.prepare('SELECT * FROM units WHERE id = ?').get(req.params.id);
+    logAudit(req.user?.id, 'update_unit', 'unit', req.params.id, { name });
     res.json(unit);
   } catch (err) {
     console.error('Update unit error:', err);
@@ -85,6 +88,7 @@ router.delete('/:id', verifyToken, (req, res) => {
     }
 
     db.prepare('DELETE FROM units WHERE id = ?').run(req.params.id);
+    logAudit(req.user?.id, 'delete_unit', 'unit', req.params.id, { name: existing.name });
     res.json({ message: 'Satuan berhasil dihapus.' });
   } catch (err) {
     console.error('Delete unit error:', err);

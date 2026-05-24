@@ -16,6 +16,7 @@ const salesRoutes = require('./routes/sales.routes');
 const reportRoutes = require('./routes/report.routes');
 const settingsRoutes = require('./routes/settings.routes');
 const userRoutes = require('./routes/user.routes');
+const auditRoutes = require('./routes/audit.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -50,6 +51,7 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/audit-logs', auditRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -63,7 +65,7 @@ app.use(errorHandler);
 async function start() {
   try {
     await initializeDatabase();
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log('============================================');
       console.log('  Apotek Web Server');
       console.log('============================================');
@@ -73,12 +75,15 @@ async function start() {
       console.log(`  Frontend: http://localhost:5173`);
       console.log('============================================');
     });
+    return server;
   } catch (err) {
     console.error('Failed to start server:', err);
     process.exit(1);
   }
 }
 
-start();
+if (require.main === module) {
+  start();
+}
 
 module.exports = app;

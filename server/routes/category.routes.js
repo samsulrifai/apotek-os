@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/categories
 router.get('/', verifyToken, (req, res) => {
@@ -36,6 +37,7 @@ router.post('/', verifyToken, (req, res) => {
     db.prepare('INSERT INTO categories (id, name, description) VALUES (?, ?, ?)').run(id, name, description || null);
 
     const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_category', 'category', id, { name });
     res.status(201).json(category);
   } catch (err) {
     console.error('Create category error:', err);
@@ -62,6 +64,7 @@ router.put('/:id', verifyToken, (req, res) => {
     db.prepare('UPDATE categories SET name = ?, description = ? WHERE id = ?').run(name, description || null, req.params.id);
 
     const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+    logAudit(req.user?.id, 'update_category', 'category', req.params.id, { name });
     res.json(category);
   } catch (err) {
     console.error('Update category error:', err);
@@ -86,6 +89,7 @@ router.delete('/:id', verifyToken, (req, res) => {
     }
 
     db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id);
+    logAudit(req.user?.id, 'delete_category', 'category', req.params.id, { name: existing.name });
     res.json({ message: 'Kategori berhasil dihapus.' });
   } catch (err) {
     console.error('Delete category error:', err);

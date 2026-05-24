@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react"
-import { Calendar as Download, Printer, DollarSign, Activity, FileText, Loader2 } from "lucide-react"
+import { Download, Printer, DollarSign, Activity, FileText, Loader2 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
 import { api } from "@/lib/api"
+import { exportToExcel } from "@/lib/exportUtils"
 import type { ProfitLossReport } from "@/types"
 
 export default function ProfitLoss() {
@@ -85,8 +86,16 @@ export default function ProfitLoss() {
           <Button variant="outline" className="shadow-sm bg-slate-50 border-slate-200 text-slate-700" onClick={() => window.print()}>
             <Printer className="mr-2 h-4 w-4" /> Cetak
           </Button>
-          <Button className="shadow-sm bg-teal-600 hover:bg-teal-700" onClick={() => window.print()}>
-            <Download className="mr-2 h-4 w-4" /> Unduh PDF
+          <Button className="shadow-sm bg-teal-600 hover:bg-teal-700" onClick={() => {
+            if (report?.details?.length) {
+              exportToExcel(
+                report.details.map(d => ({ 'Tanggal': d.date, 'Pendapatan': d.revenue, 'HPP': d.cogs, 'Laba': d.profit })),
+                `Laba-Rugi-${startDate}-${endDate}`,
+                'Laba Rugi'
+              )
+            }
+          }}>
+            <Download className="mr-2 h-4 w-4" /> Unduh Excel
           </Button>
         </div>
       </div>

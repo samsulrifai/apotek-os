@@ -67,4 +67,17 @@ function optionalAuth(req, res, next) {
   next();
 }
 
-module.exports = { verifyToken, optionalAuth, JWT_SECRET, JWT_EXPIRES_IN };
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !req.user.roles) {
+      return res.status(403).json({ error: 'Akses ditolak.' });
+    }
+    const hasRole = req.user.roles.some(r => allowedRoles.includes(r));
+    if (!hasRole) {
+      return res.status(403).json({ error: 'Anda tidak memiliki akses untuk fitur ini.' });
+    }
+    next();
+  };
+}
+
+module.exports = { verifyToken, optionalAuth, requireRole, JWT_SECRET, JWT_EXPIRES_IN };

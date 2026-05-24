@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react"
-import { Clock, AlertTriangle, Search, Loader2, Calendar } from "lucide-react"
+import { Clock, AlertTriangle, Search, Loader2, Calendar, Download } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { exportToExcel } from "@/lib/exportUtils"
 import { api } from "@/lib/api"
 import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
@@ -107,7 +109,7 @@ export default function ExpiryReport() {
           </h1>
           <p className="text-muted-foreground mt-1 text-sm font-medium">Monitor dan kelola obat yang mendekati tanggal kedaluwarsa</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {DAYS_OPTIONS.map(opt => (
             <button
               key={opt.value}
@@ -121,6 +123,22 @@ export default function ExpiryReport() {
               {opt.label}
             </button>
           ))}
+          <Button
+            variant="outline"
+            className="shadow-sm bg-white border-slate-200 text-slate-700"
+            onClick={() => {
+              if (items.length) {
+                exportToExcel(
+                  items.map(b => ({ 'Produk': b.product_name, 'SKU': b.sku, 'Batch': b.batch_number, 'Exp. Date': b.expiry_date, 'Qty': b.qty, 'Hari': b.days_until_expiry, 'Status': b.status })),
+                  `Laporan-Kedaluwarsa-${daysFilter}hari`,
+                  'Kedaluwarsa'
+                )
+              }
+            }}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export Excel
+          </Button>
         </div>
       </div>
 

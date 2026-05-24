@@ -3,10 +3,11 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const { getDb } = require('../db/database');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, requireRole } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/users
-router.get('/', verifyToken, (req, res) => {
+router.get('/', verifyToken, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
     const users = db.prepare(`
@@ -34,7 +35,7 @@ router.get('/', verifyToken, (req, res) => {
 });
 
 // POST /api/users — create user
-router.post('/', verifyToken, (req, res) => {
+router.post('/', verifyToken, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
     const { full_name, email, username, password, role } = req.body;
@@ -89,14 +90,38 @@ router.post('/', verifyToken, (req, res) => {
     `).all(id).map(r => r.name);
 
     res.status(201).json({ ...user, roles });
+    logAudit(req.user?.id, 'create_user', 'user', id, { username, role });
   } catch (err) {
     console.error('Create user error:', err);
     res.status(500).json({ error: 'Gagal membuat pengguna.' });
   }
 });
 
+// PUT /api/users/change-password (current user changes own password)
+router.put('/change-password', verifyToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const { current_password, new_password } = req.body;
+    if (!current_password || !new_password) return res.status(400).json({ error: 'Password lama dan baru wajib diisi.' });
+    if (new_password.length < 6) return res.status(400).json({ error: 'Password baru minimal 6 karakter.' });
+
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const valid = await bcrypt.compare(current_password, user.password_hash);
+    if (!valid) return res.status(400).json({ error: 'Password lama tidak sesuai.' });
+
+    const hash = await bcrypt.hash(new_password, 10);
+    db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime("now") WHERE id = ?').run(hash, req.user.id);
+    db._save();
+    logAudit(req.user.id, 'change_password', 'user', req.user.id);
+    res.json({ message: 'Password berhasil diubah.' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Gagal mengubah password.' });
+  }
+});
+
 // PUT /api/users/:id
-router.put('/:id', verifyToken, (req, res) => {
+router.put('/:id', verifyToken, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
@@ -147,6 +172,7 @@ router.put('/:id', verifyToken, (req, res) => {
     `).all(req.params.id).map(r => r.name);
 
     res.json({ ...user, roles });
+    logAudit(req.user?.id, 'update_user', 'user', req.params.id, { username: username || existing.username });
   } catch (err) {
     console.error('Update user error:', err);
     res.status(500).json({ error: err.message || 'Gagal mengupdate pengguna.' });
@@ -154,7 +180,7 @@ router.put('/:id', verifyToken, (req, res) => {
 });
 
 // PUT /api/users/:id/status
-router.put('/:id/status', verifyToken, (req, res) => {
+router.put('/:id/status', verifyToken, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
@@ -177,6 +203,7 @@ router.put('/:id/status', verifyToken, (req, res) => {
     db.prepare('UPDATE users SET status = ?, updated_at = ? WHERE id = ?')
       .run(status, new Date().toISOString(), req.params.id);
 
+    logAudit(req.user?.id, 'update_user_status', 'user', req.params.id, { status });
     res.json({ message: `Status pengguna berhasil diubah menjadi ${status}.` });
   } catch (err) {
     console.error('Update user status error:', err);

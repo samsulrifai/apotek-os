@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/products — list with search, category filter, pagination
 router.get('/', verifyToken, (req, res) => {
@@ -199,6 +200,7 @@ router.post('/', verifyToken, (req, res) => {
     `).run(id, category_id || null, unit_id || null, finalSku, barcode || null, name, generic_name || null, form || null, strength || null, manufacturer || null, drug_class || 'bebas', min_stock || 0, default_purchase_price || 0, selling_price || 0, custom_margin !== undefined && custom_margin !== null ? custom_margin : null, now, now);
 
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_product', 'product', id, { name, sku: finalSku });
     res.status(201).json(product);
   } catch (err) {
     console.error('Create product error:', err);
@@ -255,6 +257,7 @@ router.put('/:id', verifyToken, (req, res) => {
     );
 
     const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+    logAudit(req.user?.id, 'update_product', 'product', req.params.id, { name: name || existing.name });
     res.json(product);
   } catch (err) {
     console.error('Update product error:', err);
@@ -278,6 +281,7 @@ router.delete('/:id', verifyToken, (req, res) => {
     db.prepare('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?')
       .run(new Date().toISOString(), req.params.id);
 
+    logAudit(req.user?.id, 'delete_product', 'product', req.params.id, { name: existing.name });
     res.json({ message: 'Produk berhasil dinonaktifkan.' });
   } catch (err) {
     console.error('Delete product error:', err);

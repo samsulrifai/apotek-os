@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, requireRole } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/settings
 router.get('/', verifyToken, (req, res) => {
@@ -19,7 +20,7 @@ router.get('/', verifyToken, (req, res) => {
 });
 
 // PUT /api/settings — batch upsert
-router.put('/', verifyToken, (req, res) => {
+router.put('/', verifyToken, requireRole('admin'), (req, res) => {
   try {
     const db = getDb();
     const settings = req.body;
@@ -46,6 +47,7 @@ router.put('/', verifyToken, (req, res) => {
     const allSettings = db.prepare('SELECT key, value FROM app_settings').all();
     const result = {};
     allSettings.forEach(s => { result[s.key] = s.value; });
+    logAudit(req.user?.id, 'update_settings', 'settings', null, { keys: Object.keys(settings) });
     res.json(result);
   } catch (err) {
     console.error('Update settings error:', err);

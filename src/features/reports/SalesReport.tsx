@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react"
-import { ClipboardList, DollarSign, ShoppingCart, TrendingUp, Loader2 } from "lucide-react"
+import { ClipboardList, DollarSign, ShoppingCart, TrendingUp, Loader2, Download } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { exportToExcel } from "@/lib/exportUtils"
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts"
@@ -67,6 +68,22 @@ export default function SalesReport() {
           <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-40 h-9 text-sm" />
           <span className="text-slate-400 text-sm">s/d</span>
           <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-40 h-9 text-sm" />
+          <Button
+            variant="outline"
+            className="shadow-sm bg-white border-slate-200 text-slate-700"
+            onClick={() => {
+              if (report?.topProducts?.length) {
+                exportToExcel(
+                  report.topProducts.map(p => ({ 'Produk': p.product_name, 'Qty Terjual': p.qty_sold, 'Total': p.total })),
+                  `Laporan-Penjualan-${startDate}-${endDate}`,
+                  'Penjualan'
+                )
+              }
+            }}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export Excel
+          </Button>
         </div>
       </div>
 

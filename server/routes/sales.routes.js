@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
+const { logAudit } = require('../middleware/auditLog');
 
 // POST /api/sales — create sale with FEFO batch allocation
 router.post('/', verifyToken, (req, res) => {
@@ -149,6 +150,7 @@ router.post('/', verifyToken, (req, res) => {
     transaction();
 
     const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(id);
+    logAudit(req.user?.id, 'create_sale', 'sale', id, { sale_number: saleNumber, total_amount: sale.total_amount });
     res.status(201).json(sale);
   } catch (err) {
     console.error('Create sale error:', err);
@@ -233,6 +235,71 @@ router.get('/recent', verifyToken, (req, res) => {
   }
 });
 
+// GET /api/sales/returns — list all sales returns
+router.get('/returns', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const returns = db.prepare(`
+      SELECT sr.*, s.sale_number, u.full_name as created_by_name
+      FROM sales_returns sr
+      LEFT JOIN sales s ON s.id = sr.sale_id
+      LEFT JOIN users u ON u.id = sr.created_by
+      ORDER BY sr.created_at DESC
+    `).all();
+    res.json(returns);
+  } catch (err) {
+    console.error('List returns error:', err);
+    res.status(500).json({ error: 'Gagal memuat daftar retur.' });
+  }
+});
+
+// POST /api/sales/returns — create a sales return
+router.post('/returns', verifyToken, (req, res) => {
+  try {
+    const db = getDb();
+    const { sale_id, items, reason, notes } = req.body;
+    if (!sale_id || !items?.length) return res.status(400).json({ error: 'Data retur tidak lengkap.' });
+
+    const sale = db.prepare('SELECT * FROM sales WHERE id = ?').get(sale_id);
+    if (!sale) return res.status(404).json({ error: 'Transaksi tidak ditemukan.' });
+
+    const returnNumber = `RET-${Date.now()}`;
+    const returnId = uuidv4();
+    const now = new Date().toISOString();
+    let totalRefund = 0;
+
+    const doReturn = db.transaction(() => {
+      db.prepare('INSERT INTO sales_returns (id, sale_id, return_number, reason, notes, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(returnId, sale_id, returnNumber, reason || '', notes || '', 'completed', req.user?.id, now);
+
+      for (const item of items) {
+        const subtotal = item.qty_returned * item.unit_price;
+        totalRefund += subtotal;
+        db.prepare('INSERT INTO sales_return_items (id, sales_return_id, sale_item_id, product_id, qty_returned, unit_price, subtotal) VALUES (?, ?, ?, ?, ?, ?, ?)').run(uuidv4(), returnId, item.sale_item_id || null, item.product_id, item.qty_returned, item.unit_price, subtotal);
+
+        // Return stock to the first available batch
+        const batch = db.prepare('SELECT * FROM product_batches WHERE product_id = ? AND status = "active" ORDER BY expiry_date ASC LIMIT 1').get(item.product_id);
+        if (batch) {
+          db.prepare('UPDATE product_batches SET qty_on_hand = qty_on_hand + ?, updated_at = datetime("now") WHERE id = ?').run(item.qty_returned, batch.id);
+          db.prepare('INSERT INTO stock_movements (id, product_id, product_batch_id, movement_type, reference_type, reference_id, qty_in, notes, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime("now"))').run(uuidv4(), item.product_id, batch.id, 'in', 'return', returnId, item.qty_returned, 'Retur Penjualan', req.user?.id);
+        }
+      }
+
+      db.prepare('UPDATE sales_returns SET total_refund = ? WHERE id = ?').run(totalRefund, returnId);
+      // Update sale status
+      const allItems = db.prepare('SELECT SUM(qty) as total_qty FROM sale_items WHERE sale_id = ?').get(sale_id);
+      const returnedItems = db.prepare('SELECT SUM(qty_returned) as total_returned FROM sales_return_items sri JOIN sales_returns sr ON sr.id = sri.sales_return_id WHERE sr.sale_id = ?').get(sale_id);
+      const newStatus = (returnedItems?.total_returned >= allItems?.total_qty) ? 'returned_full' : 'returned_partial';
+      db.prepare('UPDATE sales SET status = ?, updated_at = datetime("now") WHERE id = ?').run(newStatus, sale_id);
+    });
+    doReturn();
+    logAudit(req.user?.id, 'create_return', 'sales_return', returnId, { sale_id, totalRefund });
+    res.status(201).json({ id: returnId, return_number: returnNumber, total_refund: totalRefund });
+  } catch (err) {
+    console.error('Create return error:', err);
+    res.status(500).json({ error: err.message || 'Gagal membuat retur penjualan.' });
+  }
+});
+
 // GET /api/sales/:id — sale detail
 router.get('/:id', verifyToken, (req, res) => {
   try {
@@ -273,3 +340,4 @@ router.get('/:id', verifyToken, (req, res) => {
 });
 
 module.exports = router;
+

@@ -13,6 +13,7 @@ import type { PurchaseOrder, Supplier, Product } from "@/types"
 import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
 import { useToast } from "@/hooks/use-toast"
+import { PageSkeleton } from "@/components/ui/PageSkeleton"
 
 export default function PurchaseOrders() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
@@ -134,14 +135,7 @@ export default function PurchaseOrders() {
   } = useTablePagination(orders)
 
   if (loading) {
-    return (
-      <div className="flex h-[50vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-          <p className="text-sm text-muted-foreground">Memuat data SP...</p>
-        </div>
-      </div>
-    )
+    return <PageSkeleton />
   }
 
   return (
