@@ -17,7 +17,8 @@ class ApiClient {
     body?: unknown,
     options?: { params?: Record<string, string | number | undefined> }
   ): Promise<T> {
-    const url = new URL(`${API_BASE}${path}`)
+    const base = API_BASE.startsWith('http') ? undefined : window.location.origin
+    const url = new URL(`${API_BASE}${path}`, base)
     
     if (options?.params) {
       Object.entries(options.params).forEach(([key, value]) => {
