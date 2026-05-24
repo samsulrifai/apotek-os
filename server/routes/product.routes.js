@@ -116,9 +116,11 @@ router.get('/search', verifyToken, (req, res) => {
     const search = `%${q}%`;
     const products = db.prepare(`
       SELECT p.id, p.sku, p.barcode, p.name, p.generic_name, p.selling_price, p.drug_class, p.form, p.strength,
+             c.name as category_name,
              u.name as unit_name, u.symbol as unit_symbol,
              COALESCE(SUM(pb.qty_on_hand), 0) as total_stock
       FROM products p
+      LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN units u ON u.id = p.unit_id
       LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
       WHERE p.is_active = 1

@@ -13,6 +13,7 @@ import type { User } from "@/types"
 import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
 import { DataTableColumnHeader } from "@/components/ui/DataTableColumnHeader"
+import { useToast } from "@/hooks/use-toast"
 
 export default function UserManagement() {
   const [users, setUsers] = useState<User[]>([])
@@ -20,9 +21,10 @@ export default function UserManagement() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<User | null>(null)
   const [saving, setSaving] = useState(false)
+  const { toast } = useToast()
 
   const [form, setForm] = useState({
-    username: '', full_name: '', role: 'cashier' as string,
+    username: '', full_name: '', email: '', role: 'cashier' as string,
     password: '', is_active: true,
   })
 
@@ -31,15 +33,21 @@ export default function UserManagement() {
     try {
       const res = await api.get<User[]>('/users')
       setUsers(Array.isArray(res) ? res : (res as any).data ?? [])
-    } catch { /* silently */ }
+    } catch {
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal memuat data pengguna." })
+    }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
 
+  // Helper to get role string from User (which has roles: Role[])
+  const getUserRole = (user: User) => user.roles?.[0]?.name ?? 'cashier'
+  const isUserActive = (user: User) => user.status === 'active'
+
   const openAdd = () => {
     setEditingItem(null)
-    setForm({ username: '', full_name: '', role: 'cashier', password: '', is_active: true })
+    setForm({ username: '', full_name: '', email: '', role: 'cashier', password: '', is_active: true })
     setDialogOpen(true)
   }
 
@@ -48,27 +56,65 @@ export default function UserManagement() {
     setForm({
       username: user.username,
       full_name: user.full_name,
-      role: user.role,
+      email: user.email || '',
+      role: getUserRole(user),
       password: '',
-      is_active: user.is_active,
+      is_active: isUserActive(user),
     })
     setDialogOpen(true)
   }
 
   const handleSave = async () => {
+    // Validation
+    if (!form.full_name.trim()) {
+      toast({ variant: "destructive", title: "Validasi", description: "Nama lengkap wajib diisi." })
+      return
+    }
+    if (!form.username.trim()) {
+      toast({ variant: "destructive", title: "Validasi", description: "Username wajib diisi." })
+      return
+    }
+    if (!form.email.trim()) {
+      toast({ variant: "destructive", title: "Validasi", description: "Email wajib diisi." })
+      return
+    }
+    if (!editingItem && !form.password.trim()) {
+      toast({ variant: "destructive", title: "Validasi", description: "Password wajib diisi untuk pengguna baru." })
+      return
+    }
+    if (form.password && form.password.length < 6) {
+      toast({ variant: "destructive", title: "Validasi", description: "Password minimal 6 karakter." })
+      return
+    }
+
     setSaving(true)
     try {
       if (editingItem) {
-        const payload: any = { full_name: form.full_name, role: form.role, is_active: form.is_active }
+        const payload: any = { full_name: form.full_name, email: form.email, role: form.role, is_active: form.is_active }
         if (form.password) payload.password = form.password
         await api.put(`/users/${editingItem.id}`, payload)
+        toast({ title: "Berhasil", description: `Pengguna "${form.full_name}" berhasil diperbarui.` })
       } else {
-        await api.post('/users', form)
+        await api.post('/users', { ...form })
+        toast({ title: "Berhasil", description: `Pengguna "${form.full_name}" berhasil ditambahkan.` })
       }
       setDialogOpen(false)
       loadData()
-    } catch { /* handle */ }
+    } catch {
+      toast({ variant: "destructive", title: "Gagal", description: editingItem ? "Gagal memperbarui pengguna." : "Gagal menambahkan pengguna." })
+    }
     finally { setSaving(false) }
+  }
+
+  const toggleActive = async (user: User) => {
+    const newActive = !isUserActive(user)
+    try {
+      await api.put(`/users/${user.id}`, { is_active: newActive })
+      toast({ title: "Berhasil", description: `Pengguna "${user.full_name}" ${newActive ? 'diaktifkan' : 'dinonaktifkan'}.` })
+      loadData()
+    } catch {
+      toast({ variant: "destructive", title: "Gagal", description: "Gagal mengubah status pengguna." })
+    }
   }
 
   const getRoleBadge = (role: string) => {
@@ -134,7 +180,7 @@ export default function UserManagement() {
             <CardContent className="p-4 flex items-center justify-between">
               <div>
                 <p className="text-slate-500 text-sm font-medium">{getRoleLabel(role)}</p>
-                <h3 className="text-2xl font-bold text-slate-800 mt-1">{users.filter(u => u.role === role).length}</h3>
+                <h3 className="text-2xl font-bold text-slate-800 mt-1">{users.filter(u => getUserRole(u) === role).length}</h3>
               </div>
               {getRoleBadge(role)}
             </CardContent>
@@ -155,9 +201,9 @@ export default function UserManagement() {
               <TableRow className="hover:bg-transparent">
                 <DataTableColumnHeader title="Pengguna" filterValue={getFilter('full_name')} onFilterChange={v => setFilter('full_name', v)} />
                 <DataTableColumnHeader title="Username" filterValue={getFilter('username')} onFilterChange={v => setFilter('username', v)} />
+                <DataTableColumnHeader title="Email" hideFilter />
                 <DataTableColumnHeader title="Role" hideFilter align="center" />
                 <DataTableColumnHeader title="Status" hideFilter align="center" />
-                <DataTableColumnHeader title="Login Terakhir" hideFilter />
                 <DataTableColumnHeader title="Aksi" hideFilter align="right" />
               </TableRow>
             </TableHeader>
@@ -180,19 +226,20 @@ export default function UserManagement() {
                       </div>
                     </TableCell>
                     <TableCell className="text-slate-600 font-mono text-sm">{user.username}</TableCell>
-                    <TableCell className="text-center">{getRoleBadge(user.role)}</TableCell>
+                    <TableCell className="text-slate-600 text-sm">{user.email || '-'}</TableCell>
+                    <TableCell className="text-center">{getRoleBadge(getUserRole(user))}</TableCell>
                     <TableCell className="text-center">
-                      <Badge variant="outline" className={user.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}>
-                        {user.is_active ? 'Aktif' : 'Nonaktif'}
+                      <Badge variant="outline" className={isUserActive(user) ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}>
+                        {isUserActive(user) ? 'Aktif' : 'Nonaktif'}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-slate-500 text-sm">
-                      {user.last_login ? new Date(user.last_login).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Belum pernah'}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-teal-600 hover:bg-teal-50" onClick={() => openEdit(user)}>
                           <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className={`h-8 w-8 ${isUserActive(user) ? 'text-amber-500 hover:text-amber-600 hover:bg-amber-50' : 'text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50'}`} onClick={() => toggleActive(user)}>
+                          {isUserActive(user) ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
                         </Button>
                       </div>
                     </TableCell>
@@ -231,6 +278,10 @@ export default function UserManagement() {
               <Input value={form.username} onChange={e => setForm({...form, username: e.target.value})} placeholder="Username" className="mt-1.5" disabled={!!editingItem} />
             </div>
             <div>
+              <Label className="text-slate-700 font-semibold text-sm">Email *</Label>
+              <Input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} placeholder="email@contoh.com" className="mt-1.5" />
+            </div>
+            <div>
               <Label className="text-slate-700 font-semibold text-sm">{editingItem ? 'Password Baru (opsional)' : 'Password *'}</Label>
               <Input type="password" value={form.password} onChange={e => setForm({...form, password: e.target.value})} placeholder={editingItem ? 'Kosongkan jika tidak ganti' : 'Minimal 6 karakter'} className="mt-1.5" />
             </div>
@@ -261,7 +312,7 @@ export default function UserManagement() {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Batal</Button>
-            <Button onClick={handleSave} disabled={saving || !form.full_name || !form.username || (!editingItem && !form.password)} className="bg-teal-600 hover:bg-teal-700">
+            <Button onClick={handleSave} disabled={saving || !form.full_name || !form.username || !form.email || (!editingItem && !form.password)} className="bg-teal-600 hover:bg-teal-700">
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               {editingItem ? 'Simpan' : 'Tambah'}
             </Button>

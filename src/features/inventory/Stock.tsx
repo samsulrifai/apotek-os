@@ -225,7 +225,7 @@ export default function Stock() {
                 </TableRow>
               ) : (
                 paginatedData.map((item) => (
-                  <TableRow key={item.id} className="hover:bg-slate-50 transition-colors">
+                  <TableRow key={item.product_id} className="hover:bg-slate-50 transition-colors">
                     <TableCell className="font-mono text-xs text-slate-400">{item.sku}</TableCell>
                     <TableCell>
                       <p className="font-bold text-slate-800">{item.product_name}</p>
@@ -235,7 +235,7 @@ export default function Stock() {
                     </TableCell>
                     <TableCell className="text-slate-600">{item.category_name || '-'}</TableCell>
                     <TableCell className="text-center font-bold">{item.total_stock}</TableCell>
-                    <TableCell className="text-center text-slate-500">{item.unit_name}</TableCell>
+                    <TableCell className="text-center text-slate-500">{item.unit_symbol}</TableCell>
                     <TableCell className="text-center">
                       {getStatusBadge(item)}
                     </TableCell>

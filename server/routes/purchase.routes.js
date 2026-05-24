@@ -351,6 +351,13 @@ router.post('/goods-receipts', verifyToken, (req, res) => {
 
     transaction();
 
+    // Set due_date on PO to 30 days from received_date if not already set
+    const receivedDate = received_date || now;
+    const dueDate = new Date(new Date(receivedDate).getTime() + 30*24*60*60*1000).toISOString().split('T')[0];
+    db.prepare('UPDATE purchase_orders SET due_date = COALESCE(due_date, ?), updated_at = ? WHERE id = ?')
+      .run(dueDate, now, purchase_order_id);
+    db._save();
+
     const gr = db.prepare('SELECT * FROM goods_receipts WHERE id = ?').get(id);
     res.status(201).json(gr);
   } catch (err) {

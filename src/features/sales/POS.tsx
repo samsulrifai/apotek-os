@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { api } from "@/lib/api"
 import { useAuth } from "@/app/providers/AuthProvider"
 import type { Product, CartItem, CreateSalePayload, Category } from "@/types"
@@ -23,6 +24,7 @@ export default function POS() {
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>("")
   const [popularProducts, setPopularProducts] = useState<Product[]>([])
+  const [receiptData, setReceiptData] = useState<{items: CartItem[], total: number, paid: number, change: number, method: string, saleNumber: string, date: string} | null>(null)
   const { toast } = useToast()
 
   // Load categories and popular products on mount
@@ -126,11 +128,19 @@ export default function POS() {
         paid_amount: paidNum,
         sale_type: hasPrescription ? 'prescription' : 'otc',
       }
-      await api.post('/sales', payload)
+      const result = await api.post('/sales', payload)
+      setReceiptData({
+        items: [...cart],
+        total,
+        paid: paidNum,
+        change: paidNum - total,
+        method: paymentMethod,
+        saleNumber: (result as any)?.sale_number || `TRX-${Date.now()}`,
+        date: new Date().toLocaleString('id-ID'),
+      })
       setSuccess(true)
       setCart([])
       setPaidAmount("")
-      setTimeout(() => setSuccess(false), 3000)
     } catch (err: any) {
       setError(err.message || "Gagal memproses penjualan")
     } finally {
@@ -414,6 +424,59 @@ export default function POS() {
           </Card>
         </div>
       </div>
+
+      <Dialog open={!!receiptData} onOpenChange={(open) => { if (!open) setReceiptData(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">Struk Penjualan</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 font-mono text-sm">
+            {/* Header */}
+            <div className="text-center border-b border-dashed border-slate-300 pb-3">
+              <p className="font-bold text-lg">Apotek Sehat Farma</p>
+              <p className="text-xs text-slate-500">Jl. Kesehatan No. 1</p>
+              <p className="text-xs text-slate-500 mt-1">{receiptData?.date}</p>
+              <p className="text-xs text-slate-500">No: {receiptData?.saleNumber}</p>
+            </div>
+            {/* Items */}
+            <div className="space-y-1 border-b border-dashed border-slate-300 pb-3">
+              {receiptData?.items.map((item, i) => (
+                <div key={i} className="flex justify-between text-xs">
+                  <div>
+                    <p className="font-medium">{item.product_name}</p>
+                    <p className="text-slate-400">{item.qty} x Rp {item.selling_price.toLocaleString('id-ID')}</p>
+                  </div>
+                  <span className="font-medium">Rp {item.subtotal.toLocaleString('id-ID')}</span>
+                </div>
+              ))}
+            </div>
+            {/* Totals */}
+            <div className="space-y-1">
+              <div className="flex justify-between font-bold">
+                <span>TOTAL</span>
+                <span>Rp {receiptData?.total.toLocaleString('id-ID')}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span>Bayar ({receiptData?.method})</span>
+                <span>Rp {receiptData?.paid.toLocaleString('id-ID')}</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span>Kembali</span>
+                <span>Rp {receiptData?.change.toLocaleString('id-ID')}</span>
+              </div>
+            </div>
+            {/* Footer */}
+            <div className="text-center text-xs text-slate-400 pt-2 border-t border-dashed border-slate-300">
+              <p>Terima kasih atas kunjungan Anda</p>
+              <p>Semoga lekas sembuh 🙏</p>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setReceiptData(null)}>Tutup</Button>
+            <Button className="flex-1 bg-teal-600 hover:bg-teal-700" onClick={() => { window.print(); setReceiptData(null) }}>Cetak</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

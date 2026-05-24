@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { Search, Plus, FileText, CheckCircle2, Clock, Truck, X, Loader2, Save, Package, Building2, CalendarDays, StickyNote, Ban } from "lucide-react"
+import { Search, Plus, FileText, CheckCircle2, Clock, Truck, X, Loader2, Save, Package, Building2, CalendarDays, StickyNote, Ban, Eye } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,9 @@ export default function PurchaseOrders() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [detailPO, setDetailPO] = useState<any>(null)
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [loadingDetail, setLoadingDetail] = useState(false)
   const { toast } = useToast()
 
   const [form, setForm] = useState({
@@ -75,6 +78,20 @@ export default function PurchaseOrders() {
       loadData()
     } catch {
       toast({ title: "Gagal", description: `Gagal ${label} SP.`, variant: "destructive" })
+    }
+  }
+
+  const handleViewDetail = async (id: string) => {
+    setLoadingDetail(true)
+    setDetailOpen(true)
+    try {
+      const detail = await api.get<any>(`/purchase-orders/${id}`)
+      setDetailPO(detail)
+    } catch {
+      toast({ title: "Gagal", description: "Gagal memuat detail SP.", variant: "destructive" })
+      setDetailOpen(false)
+    } finally {
+      setLoadingDetail(false)
     }
   }
 
@@ -192,6 +209,9 @@ export default function PurchaseOrders() {
                     </TableCell>
                     <TableCell className="text-right py-3">
                       <div className="flex justify-end gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-xs border-slate-200 text-slate-600 hover:text-teal-700 hover:bg-teal-50" onClick={() => handleViewDetail(sp.id)}>
+                          <Eye className="h-3.5 w-3.5 mr-1" /> Detail
+                        </Button>
                         {sp.status === 'draft' && (
                           <>
                             <Button size="sm" className="h-7 text-xs bg-blue-600 hover:bg-blue-700" onClick={() => handleStatusUpdate(sp.id, 'approved', 'disetujui')}>
@@ -206,9 +226,6 @@ export default function PurchaseOrders() {
                           <Button size="sm" variant="outline" className="h-7 text-xs border-rose-200 text-rose-600 hover:bg-rose-50" onClick={() => handleStatusUpdate(sp.id, 'cancelled', 'dibatalkan')}>
                             <Ban className="h-3.5 w-3.5 mr-1" /> Batal
                           </Button>
-                        )}
-                        {(sp.status === 'completed' || sp.status === 'cancelled') && (
-                          <span className="text-xs text-slate-400 italic">—</span>
                         )}
                       </div>
                     </TableCell>
@@ -373,6 +390,108 @@ export default function PurchaseOrders() {
                 Buat Surat Pesanan
               </Button>
             </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Detail PO Dialog */}
+      <Dialog open={detailOpen} onOpenChange={(open) => { if (!open) { setDetailOpen(false); setDetailPO(null) } }}>
+        <DialogContent className="sm:max-w-xl max-h-[80vh] flex flex-col p-0 gap-0">
+          <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+            <DialogHeader>
+              <DialogTitle className="text-xl text-slate-800 flex items-center">
+                <div className="h-9 w-9 rounded-lg bg-teal-100 flex items-center justify-center mr-3">
+                  <FileText className="h-5 w-5 text-teal-600" />
+                </div>
+                Detail Surat Pesanan
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {loadingDetail ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+              </div>
+            ) : detailPO ? (
+              <div className="space-y-5">
+                {/* Header Info */}
+                <div className="grid grid-cols-2 gap-4 bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Nomor SP</p>
+                    <p className="font-bold text-slate-800 font-mono">{detailPO.po_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Status</p>
+                    <div className="mt-0.5">{getStatusBadge(detailPO.status)}</div>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Supplier</p>
+                    <p className="font-medium text-slate-700 text-sm">{detailPO.supplier_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium">Tanggal Pesanan</p>
+                    <p className="text-sm text-slate-700">{new Date(detailPO.order_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                  </div>
+                  {detailPO.expected_date && (
+                    <div>
+                      <p className="text-xs text-slate-400 font-medium">Diharapkan Tiba</p>
+                      <p className="text-sm text-slate-700">{new Date(detailPO.expected_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                    </div>
+                  )}
+                  {detailPO.notes && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-slate-400 font-medium">Catatan</p>
+                      <p className="text-sm text-slate-600">{detailPO.notes}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Items */}
+                <div>
+                  <h3 className="font-bold text-slate-700 text-sm mb-3 flex items-center gap-2">
+                    <Package className="h-4 w-4 text-teal-600" />
+                    Daftar Item ({detailPO.items?.length || 0})
+                  </h3>
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    <Table>
+                      <TableHeader className="bg-slate-50">
+                        <TableRow>
+                          <TableHead className="text-xs">Produk</TableHead>
+                          <TableHead className="text-xs text-center">Qty</TableHead>
+                          <TableHead className="text-xs text-center">Diterima</TableHead>
+                          <TableHead className="text-xs text-right">Harga</TableHead>
+                          <TableHead className="text-xs text-right">Subtotal</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(detailPO.items || []).map((item: any, i: number) => (
+                          <TableRow key={i}>
+                            <TableCell className="py-2">
+                              <p className="font-medium text-sm text-slate-800">{item.product_name || item.sku || '-'}</p>
+                              {item.sku && <p className="text-xs text-slate-400">SKU: {item.sku}</p>}
+                            </TableCell>
+                            <TableCell className="text-center py-2">{item.qty_ordered}</TableCell>
+                            <TableCell className="text-center py-2">
+                              <Badge variant={item.qty_received >= item.qty_ordered ? 'default' : 'outline'} className={item.qty_received >= item.qty_ordered ? 'bg-emerald-100 text-emerald-700 shadow-none' : 'text-slate-500'}>
+                                {item.qty_received || 0}/{item.qty_ordered}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right py-2 text-sm">Rp {(item.unit_price || 0).toLocaleString('id-ID')}</TableCell>
+                            <TableCell className="text-right py-2 font-bold text-sm">Rp {((item.qty_ordered || 0) * (item.unit_price || 0)).toLocaleString('id-ID')}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                {/* Total */}
+                <div className="flex justify-between items-center bg-gradient-to-r from-teal-50 to-emerald-50 rounded-xl p-4 border border-teal-100">
+                  <span className="font-bold text-teal-800">Total Pesanan</span>
+                  <span className="text-xl font-black text-teal-700">Rp {(detailPO.total_amount || 0).toLocaleString('id-ID')}</span>
+                </div>
+              </div>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

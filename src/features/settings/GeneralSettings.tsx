@@ -27,10 +27,27 @@ export default function GeneralSettings() {
   }, [])
 
   const handleSave = async () => {
+    // Validation
+    if (!settings.pharmacy_name?.trim()) {
+      toast({ title: "Validasi Gagal", description: "Nama Apotek wajib diisi.", variant: "destructive" })
+      return
+    }
+    const ppn = parseFloat(settings.ppn_rate)
+    const margin = parseFloat(settings.default_margin)
+    if (isNaN(ppn) || ppn < 0 || ppn > 100) {
+      toast({ title: "Validasi Gagal", description: "PPN harus berupa angka antara 0-100.", variant: "destructive" })
+      return
+    }
+    if (isNaN(margin) || margin < 0 || margin > 100) {
+      toast({ title: "Validasi Gagal", description: "Margin harus berupa angka antara 0-100.", variant: "destructive" })
+      return
+    }
+
     setSaving(true)
     try {
       await api.put('/settings', settings)
       setIsSaved(true)
+      toast({ title: "Berhasil", description: "Pengaturan berhasil disimpan." })
       setTimeout(() => setIsSaved(false), 3000)
     } catch {
       toast({ title: "Gagal Menyimpan", description: "Terjadi kesalahan saat menyimpan pengaturan. Silakan coba lagi.", variant: "destructive" })

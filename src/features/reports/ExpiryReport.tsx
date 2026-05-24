@@ -20,16 +20,36 @@ interface ExpiryItem {
   status: 'expired' | 'critical' | 'warning' | 'safe'
 }
 
+const DAYS_OPTIONS = [
+  { label: "Semua", value: 0 },
+  { label: "< 30 Hari", value: 30 },
+  { label: "< 60 Hari", value: 60 },
+  { label: "< 90 Hari", value: 90 },
+  { label: "< 180 Hari", value: 180 },
+] as const
+
 export default function ExpiryReport() {
   const [items, setItems] = useState<ExpiryItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [daysFilter, setDaysFilter] = useState(0)
+
+  const loadData = async (days: number) => {
+    setLoading(true)
+    try {
+      const params: Record<string, string> = {}
+      if (days > 0) params.days = String(days)
+      const res = await api.get<ExpiryItem[]>('/reports/expiries', params)
+      setItems(Array.isArray(res) ? res : (res as any).data ?? [])
+    } catch {
+      // handle silently
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    api.get<ExpiryItem[]>('/reports/expiries')
-      .then(res => setItems(Array.isArray(res) ? res : (res as any).data ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+    loadData(daysFilter)
+  }, [daysFilter])
 
   const getStatusBadge = (item: ExpiryItem) => {
     const days = item.days_until_expiry
@@ -37,6 +57,14 @@ export default function ExpiryReport() {
     if (days <= 30) return <Badge className="bg-rose-50 text-rose-700 border-rose-200 shadow-none hover:bg-rose-100">ED &lt; 1 Bulan</Badge>
     if (days <= 90) return <Badge className="bg-amber-50 text-amber-700 border-amber-200 shadow-none hover:bg-amber-100">ED &lt; 3 Bulan</Badge>
     return <Badge className="bg-blue-50 text-blue-700 border-blue-200 shadow-none hover:bg-blue-100">ED &lt; 6 Bulan</Badge>
+  }
+
+  const getRowClassName = (item: ExpiryItem) => {
+    const days = item.days_until_expiry
+    if (days <= 0) return 'bg-rose-50/60 hover:bg-rose-100/60'
+    if (days <= 30) return 'bg-orange-50/50 hover:bg-orange-100/50'
+    if (days <= 90) return 'bg-amber-50/40 hover:bg-amber-100/40'
+    return 'hover:bg-slate-50'
   }
 
   const expired = items.filter(i => i.days_until_expiry <= 0)
@@ -71,12 +99,29 @@ export default function ExpiryReport() {
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
-          <Clock className="mr-3 h-8 w-8 text-teal-600" />
-          Laporan Kedaluwarsa (ED)
-        </h1>
-        <p className="text-muted-foreground mt-1 text-sm font-medium">Monitor dan kelola obat yang mendekati tanggal kedaluwarsa</p>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center">
+            <Clock className="mr-3 h-8 w-8 text-teal-600" />
+            Laporan Kedaluwarsa (ED)
+          </h1>
+          <p className="text-muted-foreground mt-1 text-sm font-medium">Monitor dan kelola obat yang mendekati tanggal kedaluwarsa</p>
+        </div>
+        <div className="flex gap-2">
+          {DAYS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md border transition-colors ${
+                daysFilter === opt.value
+                  ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+              onClick={() => setDaysFilter(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Stats */}
@@ -145,7 +190,7 @@ export default function ExpiryReport() {
                 </TableRow>
               ) : (
                 paginatedData.map((item, i) => (
-                  <TableRow key={i} className={`hover:bg-slate-50 transition-colors ${item.days_until_expiry <= 0 ? 'bg-rose-50/30' : ''}`}>
+                  <TableRow key={i} className={`transition-colors ${getRowClassName(item)}`}>
                     <TableCell className="font-mono text-xs text-slate-400">{item.sku}</TableCell>
                     <TableCell className="font-bold text-slate-800">{item.product_name}</TableCell>
                     <TableCell>

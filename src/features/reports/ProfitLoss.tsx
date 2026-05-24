@@ -6,12 +6,10 @@ import { Input } from "@/components/ui/input"
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from "recharts"
 import { api } from "@/lib/api"
 import type { ProfitLossReport } from "@/types"
-import { useToast } from "@/hooks/use-toast"
 
 export default function ProfitLoss() {
   const [report, setReport] = useState<ProfitLossReport | null>(null)
   const [loading, setLoading] = useState(true)
-  const { toast } = useToast()
   const [startDate, setStartDate] = useState(() => {
     const d = new Date(); d.setDate(1)
     return d.toISOString().split('T')[0]
@@ -84,10 +82,10 @@ export default function ProfitLoss() {
           <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-40 h-9 text-sm" />
           <span className="text-slate-400 text-sm">s/d</span>
           <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-40 h-9 text-sm" />
-          <Button variant="outline" className="shadow-sm bg-slate-50 border-slate-200 text-slate-700" onClick={() => toast({ title: "Segera Hadir", description: "Fitur cetak laporan masih dalam tahap pengembangan." })}>
+          <Button variant="outline" className="shadow-sm bg-slate-50 border-slate-200 text-slate-700" onClick={() => window.print()}>
             <Printer className="mr-2 h-4 w-4" /> Cetak
           </Button>
-          <Button className="shadow-sm bg-teal-600 hover:bg-teal-700" onClick={() => toast({ title: "Segera Hadir", description: "Fitur unduh PDF masih dalam tahap pengembangan." })}>
+          <Button className="shadow-sm bg-teal-600 hover:bg-teal-700" onClick={() => window.print()}>
             <Download className="mr-2 h-4 w-4" /> Unduh PDF
           </Button>
         </div>
@@ -255,7 +253,7 @@ export default function ProfitLoss() {
               </CardTitle>
             </CardHeader>
             <CardContent className="h-[320px] pb-6">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <PieChart>
                   <Pie
                     data={opexData}
