@@ -120,15 +120,17 @@ router.get('/stats', verifyToken, async (req, res) => {
       ) sub
     `);
 
+    const today = new Date().toISOString().split('T')[0];
+    const date90 = new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0];
     const expiringCount = await queryOne(`
       SELECT COUNT(*) as count FROM product_batches pb
       JOIN products p ON p.id = pb.product_id
       WHERE pb.status = 'active' AND pb.qty_on_hand > 0
         AND pb.expiry_date IS NOT NULL
-        AND pb.expiry_date::date <= CURRENT_DATE + INTERVAL '90 days'
-        AND pb.expiry_date::date >= CURRENT_DATE
+        AND pb.expiry_date >= $1
+        AND pb.expiry_date <= $2
         AND p.is_active = 1
-    `);
+    `, [today, date90]);
 
     res.json({
       totalItems: totalItems.count,
@@ -147,6 +149,8 @@ router.get('/expiring', verifyToken, async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 90;
 
+    const todayStr = new Date().toISOString().split('T')[0];
+    const maxDate = new Date(Date.now() + days * 86400000).toISOString().split('T')[0];
     const batches = await query(`
       SELECT pb.*, p.name as product_name, p.sku, p.generic_name,
              u.name as unit_name
@@ -155,11 +159,11 @@ router.get('/expiring', verifyToken, async (req, res) => {
       LEFT JOIN units u ON u.id = p.unit_id
       WHERE pb.status = 'active' AND pb.qty_on_hand > 0
         AND pb.expiry_date IS NOT NULL
-        AND pb.expiry_date::date <= CURRENT_DATE + (? || ' days')::INTERVAL
-        AND pb.expiry_date::date >= CURRENT_DATE
+        AND pb.expiry_date >= $1
+        AND pb.expiry_date <= $2
         AND p.is_active = 1
       ORDER BY pb.expiry_date ASC
-    `, [days]);
+    `, [todayStr, maxDate]);
 
     res.json(batches);
   } catch (err) {

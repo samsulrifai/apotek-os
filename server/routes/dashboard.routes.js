@@ -6,13 +6,13 @@ const { verifyToken } = require('../middleware/auth');
 // GET /api/dashboard/summary
 router.get('/summary', verifyToken, async (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0]; // 'YYYY-MM-DD'
 
-    // Today's sales
+    // Today's sales — sold_at is TEXT stored as ISO string, compare with LIKE or LEFT()
     const todaySales = await queryOne(`
       SELECT COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
       FROM sales
-      WHERE sold_at::date = ?::date AND status = 'paid'
+      WHERE LEFT(sold_at, 10) = $1 AND status = 'paid'
     `, [today]);
 
     // Total active products
@@ -30,14 +30,18 @@ router.get('/summary', verifyToken, async (req, res) => {
       ) sub
     `);
 
-    // Expiring batches (within 90 days)
+    // Expiring batches (within 90 days) — expiry_date is TEXT 'YYYY-MM-DD'
+    const today90 = new Date();
+    today90.setDate(today90.getDate() + 90);
+    const date90 = today90.toISOString().split('T')[0];
+
     const expiringBatches = await queryOne(`
       SELECT COUNT(*) as count FROM product_batches
       WHERE status = 'active' AND qty_on_hand > 0
         AND expiry_date IS NOT NULL
-        AND expiry_date::date <= CURRENT_DATE + INTERVAL '90 days'
-        AND expiry_date::date >= CURRENT_DATE
-    `);
+        AND expiry_date >= $1
+        AND expiry_date <= $2
+    `, [today, date90]);
 
     // Recent transactions (last 5)
     const recentTransactions = await query(`
@@ -49,14 +53,18 @@ router.get('/summary', verifyToken, async (req, res) => {
       LIMIT 5
     `);
 
-    // Sales trend (last 7 days)
+    // Sales trend (last 7 days) — sold_at is TEXT, use LEFT(sold_at, 10) to get date part
+    const date7ago = new Date();
+    date7ago.setDate(date7ago.getDate() - 6);
+    const dateFrom = date7ago.toISOString().split('T')[0];
+
     const salesTrend = await query(`
-      SELECT sold_at::date::text as date, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
+      SELECT LEFT(sold_at, 10) as date, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
       FROM sales
-      WHERE sold_at::date >= CURRENT_DATE - INTERVAL '6 days' AND status = 'paid'
-      GROUP BY sold_at::date
-      ORDER BY sold_at::date ASC
-    `);
+      WHERE LEFT(sold_at, 10) >= $1 AND status = 'paid'
+      GROUP BY LEFT(sold_at, 10)
+      ORDER BY LEFT(sold_at, 10) ASC
+    `, [dateFrom]);
 
     // Fill missing days in trend
     const trendMap = {};
@@ -69,7 +77,7 @@ router.get('/summary', verifyToken, async (req, res) => {
       fullTrend.push(trendMap[dateStr] || { date: dateStr, count: 0, total: 0 });
     }
 
-    // Stock alerts (top 5)
+    // Stock alerts (top 5 critical)
     const stockAlerts = await query(`
       SELECT p.id, p.name, p.sku, p.min_stock, COALESCE(SUM(pb.qty_on_hand), 0) as current_stock
       FROM products p
@@ -81,7 +89,7 @@ router.get('/summary', verifyToken, async (req, res) => {
       LIMIT 5
     `);
 
-    // Expiry alerts (top 5)
+    // Expiry alerts (top 5) — expiry_date is TEXT 'YYYY-MM-DD'
     const expiryAlerts = await query(`
       SELECT pb.id, pb.batch_number, pb.expiry_date, pb.qty_on_hand,
              p.name as product_name, p.sku
@@ -89,17 +97,20 @@ router.get('/summary', verifyToken, async (req, res) => {
       JOIN products p ON p.id = pb.product_id
       WHERE pb.status = 'active' AND pb.qty_on_hand > 0
         AND pb.expiry_date IS NOT NULL
-        AND pb.expiry_date::date <= CURRENT_DATE + INTERVAL '90 days'
-        AND pb.expiry_date::date >= CURRENT_DATE
+        AND pb.expiry_date >= $1
+        AND pb.expiry_date <= $2
       ORDER BY pb.expiry_date ASC
       LIMIT 5
-    `);
+    `, [today, date90]);
 
     res.json({
-      todaySales: { count: todaySales.count, total: todaySales.total },
-      totalProducts: totalProducts.count,
-      criticalStock: criticalStock.count,
-      expiringBatches: expiringBatches.count,
+      todaySales: {
+        count: parseInt(todaySales.count) || 0,
+        total: parseFloat(todaySales.total) || 0
+      },
+      totalProducts: parseInt(totalProducts.count) || 0,
+      criticalStock: parseInt(criticalStock.count) || 0,
+      expiringBatches: parseInt(expiringBatches.count) || 0,
       recentTransactions,
       salesTrend: fullTrend,
       stockAlerts,
@@ -107,7 +118,7 @@ router.get('/summary', verifyToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Dashboard error:', err);
-    res.status(500).json({ error: 'Gagal memuat data dashboard.' });
+    res.status(500).json({ error: err.message || 'Gagal memuat data dashboard.' });
   }
 });
 

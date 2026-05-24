@@ -124,8 +124,8 @@ router.get('/', verifyToken, async (req, res) => {
       const srch = `%${search}%`;
       params.push(srch, srch);
     }
-    if (start_date) { conditions.push('s.sold_at::date >= ?::date'); params.push(start_date); }
-    if (end_date) { conditions.push('s.sold_at::date <= ?::date'); params.push(end_date); }
+    if (start_date) { conditions.push('LEFT(s.sold_at, 10) >= ?'); params.push(start_date); }
+    if (end_date) { conditions.push('LEFT(s.sold_at, 10) <= ?'); params.push(end_date); }
     if (status) { conditions.push('s.status = ?'); params.push(status); }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
