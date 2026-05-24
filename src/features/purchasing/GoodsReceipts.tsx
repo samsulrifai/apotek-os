@@ -41,29 +41,21 @@ export default function GoodsReceipts() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [receiptsRes, ...posResults] = await Promise.all([
-        api.get<GoodsReceipt[]>('/goods-receipts'),
-        // Fetch POs for each receivable status separately to ensure we get all
-        api.get<any>('/purchase-orders', { status: 'approved', limit: 100 }),
-        api.get<any>('/purchase-orders', { status: 'partial', limit: 100 }),
-        api.get<any>('/purchase-orders', { status: 'ordered', limit: 100 }),
-      ])
-      setReceipts(Array.isArray(receiptsRes) ? receiptsRes : (receiptsRes as any).data ?? [])
-      // Merge all receivable POs
-      const allPOs: PurchaseOrder[] = []
-      const seenIds = new Set<string>()
-      for (const posRes of posResults) {
-        const poList = Array.isArray(posRes) ? posRes : posRes.data ?? []
-        for (const po of poList) {
-          if (!seenIds.has(po.id)) {
-            seenIds.add(po.id)
-            allPOs.push(po)
-          }
-        }
-      }
-      setPurchaseOrders(allPOs)
-    } catch { /* silently */ }
-    finally { setLoading(false) }
+      // Fetch receipts
+      const receiptsRes = await api.get<any>('/goods-receipts')
+      setReceipts(Array.isArray(receiptsRes) ? receiptsRes : receiptsRes?.data ?? [])
+    } catch (e) {
+      console.error('Failed to load receipts:', e)
+    }
+    try {
+      // Fetch ALL purchase orders with a high limit, filter client-side
+      const posRes = await api.get<any>('/purchase-orders', { limit: 500 })
+      const poList = Array.isArray(posRes) ? posRes : posRes?.data ?? []
+      setPurchaseOrders(poList)
+    } catch (e) {
+      console.error('Failed to load POs:', e)
+    }
+    setLoading(false)
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
