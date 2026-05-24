@@ -145,7 +145,7 @@ export default function SalesReport() {
                   <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={(v) => `Rp${v / 1000000}M`} />
                   <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#f1f5f9" />
                   <Tooltip
-                    formatter={(value: number) => [formatRp(value), 'Penjualan']}
+                    formatter={(value: any) => [formatRp(value), 'Penjualan']}
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontWeight: 600 }}
                   />
                   <Area type="monotone" dataKey="total" stroke="#0d9488" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" activeDot={{ r: 5, strokeWidth: 0, fill: '#0f766e' }} />

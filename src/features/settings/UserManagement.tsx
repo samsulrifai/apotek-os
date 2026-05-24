@@ -3,7 +3,7 @@ import { Users, Plus, Search, Edit, Shield, ShieldCheck, ShieldAlert, Loader2, S
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -287,7 +287,7 @@ export default function UserManagement() {
             </div>
             <div>
               <Label className="text-slate-700 font-semibold text-sm">Role *</Label>
-              <Select value={form.role} onValueChange={v => setForm({...form, role: v})}>
+              <Select value={form.role || ''} onValueChange={v => setForm({...form, role: v || ''})}>
                 <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>

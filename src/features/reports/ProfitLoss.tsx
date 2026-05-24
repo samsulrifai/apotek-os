@@ -278,7 +278,7 @@ export default function ProfitLoss() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value: number) => formatRp(value)}
+                    formatter={(value: any) => formatRp(value)}
                     contentStyle={{ borderRadius: '8px', border: '1px solid #f1f5f9', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   />
                   <Legend 

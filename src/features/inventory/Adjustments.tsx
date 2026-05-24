@@ -15,7 +15,7 @@ import { useTablePagination } from "@/hooks/useTablePagination"
 import { DataTablePagination } from "@/components/ui/DataTablePagination"
 import { useToast } from "@/hooks/use-toast"
 
-interface AdjustmentDetail extends StockAdjustment {
+interface AdjustmentDetail extends Omit<StockAdjustment, 'items'> {
   items: {
     id: string
     product_id: string
@@ -395,7 +395,7 @@ export default function Adjustments() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label className="text-slate-700 font-semibold text-sm">Alasan Penyesuaian <span className="text-rose-500">*</span></Label>
-                <Select value={form.reason || undefined} onValueChange={(val) => setForm({...form, reason: val})}>
+                <Select value={form.reason || ''} onValueChange={(val) => setForm({...form, reason: val || ''})}>
                   <SelectTrigger className="mt-1.5"><SelectValue placeholder="Pilih alasan" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="stock_opname">Stok Opname</SelectItem>
