@@ -1,14 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('../db/database');
+const { query, queryOne, execute } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
 const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/products — list with search, category filter, pagination
-router.get('/', verifyToken, (req, res) => {
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
     const { search, category_id, page = 1, limit = 20, is_active } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
@@ -34,9 +33,9 @@ router.get('/', verifyToken, (req, res) => {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const total = db.prepare(`SELECT COUNT(*) as count FROM products p ${whereClause}`).get(...params);
+    const total = await queryOne(`SELECT COUNT(*) as count FROM products p ${whereClause}`, params);
 
-    const products = db.prepare(`
+    const products = await query(`
       SELECT p.*, c.name as category_name, u.name as unit_name, u.symbol as unit_symbol,
              COALESCE(SUM(pb.qty_on_hand), 0) as total_stock
       FROM products p
@@ -44,10 +43,10 @@ router.get('/', verifyToken, (req, res) => {
       LEFT JOIN units u ON u.id = p.unit_id
       LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
       ${whereClause}
-      GROUP BY p.id
+      GROUP BY p.id, c.name, u.name, u.symbol
       ORDER BY p.name ASC
       LIMIT ? OFFSET ?
-    `).all(...params, parseInt(limit), offset);
+    `, [...params, parseInt(limit), offset]);
 
     res.json({
       data: products,
@@ -65,31 +64,29 @@ router.get('/', verifyToken, (req, res) => {
 });
 
 // GET /api/products/stats
-router.get('/stats', verifyToken, (req, res) => {
+router.get('/stats', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
+    const total = await queryOne('SELECT COUNT(*) as count FROM products');
+    const active = await queryOne('SELECT COUNT(*) as count FROM products WHERE is_active = 1');
+    const inactive = await queryOne('SELECT COUNT(*) as count FROM products WHERE is_active = 0');
 
-    const total = db.prepare('SELECT COUNT(*) as count FROM products').get();
-    const active = db.prepare('SELECT COUNT(*) as count FROM products WHERE is_active = 1').get();
-    const inactive = db.prepare('SELECT COUNT(*) as count FROM products WHERE is_active = 0').get();
-
-    const byCategory = db.prepare(`
+    const byCategory = await query(`
       SELECT c.name, COUNT(p.id) as count
       FROM categories c
       LEFT JOIN products p ON p.category_id = c.id AND p.is_active = 1
-      GROUP BY c.id
+      GROUP BY c.id, c.name
       ORDER BY count DESC
-    `).all();
+    `);
 
-    const lowStock = db.prepare(`
+    const lowStock = await queryOne(`
       SELECT COUNT(*) as count FROM (
         SELECT p.id FROM products p
         LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
         WHERE p.is_active = 1 AND p.min_stock > 0
-        GROUP BY p.id
+        GROUP BY p.id, p.min_stock
         HAVING COALESCE(SUM(pb.qty_on_hand), 0) < p.min_stock
-      )
-    `).get();
+      ) sub
+    `);
 
     res.json({
       total: total.count,
@@ -105,17 +102,13 @@ router.get('/stats', verifyToken, (req, res) => {
 });
 
 // GET /api/products/search?q= — quick search for POS
-router.get('/search', verifyToken, (req, res) => {
+router.get('/search', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
     const { q } = req.query;
-
-    if (!q || q.length < 1) {
-      return res.json([]);
-    }
+    if (!q || q.length < 1) return res.json([]);
 
     const search = `%${q}%`;
-    const products = db.prepare(`
+    const products = await query(`
       SELECT p.id, p.sku, p.barcode, p.name, p.generic_name, p.selling_price, p.drug_class, p.form, p.strength,
              c.name as category_name,
              u.name as unit_name, u.symbol as unit_symbol,
@@ -126,11 +119,11 @@ router.get('/search', verifyToken, (req, res) => {
       LEFT JOIN product_batches pb ON pb.product_id = p.id AND pb.status = 'active'
       WHERE p.is_active = 1
         AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ? OR p.generic_name LIKE ?)
-      GROUP BY p.id
-      HAVING total_stock > 0
+      GROUP BY p.id, p.sku, p.barcode, p.name, p.generic_name, p.selling_price, p.drug_class, p.form, p.strength, c.name, u.name, u.symbol
+      HAVING COALESCE(SUM(pb.qty_on_hand), 0) > 0
       ORDER BY p.name ASC
       LIMIT 20
-    `).all(search, search, search, search);
+    `, [search, search, search, search]);
 
     res.json(products);
   } catch (err) {
@@ -140,27 +133,19 @@ router.get('/search', verifyToken, (req, res) => {
 });
 
 // GET /api/products/:id — detail with batches
-router.get('/:id', verifyToken, (req, res) => {
+router.get('/:id', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const product = db.prepare(`
+    const product = await queryOne(`
       SELECT p.*, c.name as category_name, u.name as unit_name
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN units u ON u.id = p.unit_id
       WHERE p.id = ?
-    `).get(req.params.id);
+    `, [req.params.id]);
 
-    if (!product) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan.' });
-    }
+    if (!product) return res.status(404).json({ error: 'Produk tidak ditemukan.' });
 
-    const batches = db.prepare(`
-      SELECT * FROM product_batches
-      WHERE product_id = ?
-      ORDER BY expiry_date ASC
-    `).all(req.params.id);
-
+    const batches = await query('SELECT * FROM product_batches WHERE product_id = ? ORDER BY expiry_date ASC', [req.params.id]);
     const totalStock = batches.reduce((sum, b) => sum + (b.status === 'active' ? b.qty_on_hand : 0), 0);
 
     res.json({ ...product, batches, total_stock: totalStock });
@@ -171,40 +156,36 @@ router.get('/:id', verifyToken, (req, res) => {
 });
 
 // POST /api/products — create product
-router.post('/', verifyToken, (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
     const {
       category_id, unit_id, sku, barcode, name, generic_name,
       form, strength, manufacturer, drug_class,
       min_stock, default_purchase_price, selling_price, custom_margin
     } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: 'Nama produk harus diisi.' });
-    }
+    if (!name) return res.status(400).json({ error: 'Nama produk harus diisi.' });
 
-    // Generate SKU if not provided
     let finalSku = sku;
     if (!finalSku) {
-      const count = db.prepare('SELECT COUNT(*) as count FROM products').get();
-      finalSku = `PRD-${String(count.count + 1).padStart(4, '0')}`;
+      const count = await queryOne('SELECT COUNT(*) as count FROM products');
+      finalSku = `PRD-${String(Number(count.count) + 1).padStart(4, '0')}`;
     }
 
     const id = uuidv4();
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await execute(`
       INSERT INTO products (id, category_id, unit_id, sku, barcode, name, generic_name, form, strength, manufacturer, drug_class, min_stock, default_purchase_price, selling_price, custom_margin, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, category_id || null, unit_id || null, finalSku, barcode || null, name, generic_name || null, form || null, strength || null, manufacturer || null, drug_class || 'bebas', min_stock || 0, default_purchase_price || 0, selling_price || 0, custom_margin !== undefined && custom_margin !== null ? custom_margin : null, now, now);
+    `, [id, category_id || null, unit_id || null, finalSku, barcode || null, name, generic_name || null, form || null, strength || null, manufacturer || null, drug_class || 'bebas', min_stock || 0, default_purchase_price || 0, selling_price || 0, custom_margin !== undefined && custom_margin !== null ? custom_margin : null, now, now]);
 
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+    const product = await queryOne('SELECT * FROM products WHERE id = ?', [id]);
     logAudit(req.user?.id, 'create_product', 'product', id, { name, sku: finalSku });
     res.status(201).json(product);
   } catch (err) {
     console.error('Create product error:', err);
-    if (err.message && err.message.includes('UNIQUE')) {
+    if (err.message && (err.message.includes('UNIQUE') || err.message.includes('unique') || err.message.includes('duplicate'))) {
       return res.status(409).json({ error: 'SKU atau barcode sudah digunakan.' });
     }
     res.status(500).json({ error: 'Gagal membuat produk.' });
@@ -212,14 +193,10 @@ router.post('/', verifyToken, (req, res) => {
 });
 
 // PUT /api/products/:id — update product
-router.put('/:id', verifyToken, (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
-
-    if (!existing) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan.' });
-    }
+    const existing = await queryOne('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Produk tidak ditemukan.' });
 
     const {
       category_id, unit_id, sku, barcode, name, generic_name,
@@ -229,14 +206,14 @@ router.put('/:id', verifyToken, (req, res) => {
 
     const now = new Date().toISOString();
 
-    db.prepare(`
+    await execute(`
       UPDATE products SET
         category_id = ?, unit_id = ?, sku = ?, barcode = ?, name = ?, generic_name = ?,
         form = ?, strength = ?, manufacturer = ?, drug_class = ?,
         min_stock = ?, default_purchase_price = ?, selling_price = ?,
         custom_margin = ?, is_active = ?, updated_at = ?
       WHERE id = ?
-    `).run(
+    `, [
       category_id !== undefined ? category_id : existing.category_id,
       unit_id !== undefined ? unit_id : existing.unit_id,
       sku !== undefined ? sku : existing.sku,
@@ -252,16 +229,15 @@ router.put('/:id', verifyToken, (req, res) => {
       selling_price !== undefined ? selling_price : existing.selling_price,
       custom_margin !== undefined ? (custom_margin !== null ? custom_margin : null) : existing.custom_margin,
       is_active !== undefined ? is_active : existing.is_active,
-      now,
-      req.params.id
-    );
+      now, req.params.id
+    ]);
 
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+    const product = await queryOne('SELECT * FROM products WHERE id = ?', [req.params.id]);
     logAudit(req.user?.id, 'update_product', 'product', req.params.id, { name: name || existing.name });
     res.json(product);
   } catch (err) {
     console.error('Update product error:', err);
-    if (err.message && err.message.includes('UNIQUE')) {
+    if (err.message && (err.message.includes('UNIQUE') || err.message.includes('unique') || err.message.includes('duplicate'))) {
       return res.status(409).json({ error: 'SKU atau barcode sudah digunakan.' });
     }
     res.status(500).json({ error: 'Gagal mengupdate produk.' });
@@ -269,18 +245,12 @@ router.put('/:id', verifyToken, (req, res) => {
 });
 
 // DELETE /api/products/:id — soft delete
-router.delete('/:id', verifyToken, (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+    const existing = await queryOne('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Produk tidak ditemukan.' });
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Produk tidak ditemukan.' });
-    }
-
-    db.prepare('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?')
-      .run(new Date().toISOString(), req.params.id);
-
+    await execute('UPDATE products SET is_active = 0, updated_at = ? WHERE id = ?', [new Date().toISOString(), req.params.id]);
     logAudit(req.user?.id, 'delete_product', 'product', req.params.id, { name: existing.name });
     res.json({ message: 'Produk berhasil dinonaktifkan.' });
   } catch (err) {

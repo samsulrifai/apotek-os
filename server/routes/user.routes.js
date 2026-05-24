@@ -2,29 +2,21 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
-const { getDb } = require('../db/database');
+const { query, queryOne, execute, getPool, convertParams } = require('../db/database');
 const { verifyToken, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/users
-router.get('/', verifyToken, requireRole('admin'), (req, res) => {
+router.get('/', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    const db = getDb();
-    const users = db.prepare(`
+    const users = await query(`
       SELECT u.id, u.full_name, u.email, u.username, u.status, u.last_login_at, u.created_at, u.updated_at
-      FROM users u
-      ORDER BY u.created_at DESC
-    `).all();
-
-    // Attach roles
-    const getRoles = db.prepare(`
-      SELECT r.name FROM roles r
-      JOIN user_roles ur ON ur.role_id = r.id
-      WHERE ur.user_id = ?
+      FROM users u ORDER BY u.created_at DESC
     `);
 
     for (const user of users) {
-      user.roles = getRoles.all(user.id).map(r => r.name);
+      const roles = await query('SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = ?', [user.id]);
+      user.roles = roles.map(r => r.name);
     }
 
     res.json(users);
@@ -35,59 +27,45 @@ router.get('/', verifyToken, requireRole('admin'), (req, res) => {
 });
 
 // POST /api/users — create user
-router.post('/', verifyToken, requireRole('admin'), (req, res) => {
+router.post('/', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    const db = getDb();
     const { full_name, email, username, password, role } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username dan password harus diisi.' });
+    if (password.length < 6) return res.status(400).json({ error: 'Password minimal 6 karakter.' });
 
-    if (!username || !password) {
-      return res.status(400).json({ error: 'Username dan password harus diisi.' });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Password minimal 6 karakter.' });
-    }
-
-    // Check existing
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-    if (existing) {
-      return res.status(409).json({ error: 'Username sudah digunakan.' });
-    }
+    const existing = await queryOne('SELECT id FROM users WHERE username = ?', [username]);
+    if (existing) return res.status(409).json({ error: 'Username sudah digunakan.' });
 
     if (email) {
-      const emailExists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-      if (emailExists) {
-        return res.status(409).json({ error: 'Email sudah digunakan.' });
-      }
+      const emailExists = await queryOne('SELECT id FROM users WHERE email = ?', [email]);
+      if (emailExists) return res.status(409).json({ error: 'Email sudah digunakan.' });
     }
 
     const id = uuidv4();
     const now = new Date().toISOString();
     const passwordHash = bcrypt.hashSync(password, 10);
 
-    const transaction = db.transaction(() => {
-      db.prepare(`
-        INSERT INTO users (id, full_name, email, username, password_hash, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, full_name || username, email || null, username, passwordHash, now, now);
-
-      // Assign role
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(convertParams('INSERT INTO users (id, full_name, email, username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'),
+        [id, full_name || username, email || null, username, passwordHash, now, now]);
       if (role) {
-        const roleRecord = db.prepare('SELECT id FROM roles WHERE name = ?').get(role);
-        if (roleRecord) {
-          db.prepare('INSERT INTO user_roles (id, user_id, role_id) VALUES (?, ?, ?)').run(uuidv4(), id, roleRecord.id);
+        const { rows } = await client.query(convertParams('SELECT id FROM roles WHERE name = ?'), [role]);
+        if (rows[0]) {
+          await client.query(convertParams('INSERT INTO user_roles (id, user_id, role_id) VALUES (?, ?, ?)'), [uuidv4(), id, rows[0].id]);
         }
       }
-    });
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
-    transaction();
-
-    const user = db.prepare('SELECT id, full_name, email, username, status, created_at FROM users WHERE id = ?').get(id);
-    const roles = db.prepare(`
-      SELECT r.name FROM roles r
-      JOIN user_roles ur ON ur.role_id = r.id
-      WHERE ur.user_id = ?
-    `).all(id).map(r => r.name);
+    const user = await queryOne('SELECT id, full_name, email, username, status, created_at FROM users WHERE id = ?', [id]);
+    const roles = (await query('SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = ?', [id])).map(r => r.name);
 
     res.status(201).json({ ...user, roles });
     logAudit(req.user?.id, 'create_user', 'user', id, { username, role });
@@ -97,21 +75,19 @@ router.post('/', verifyToken, requireRole('admin'), (req, res) => {
   }
 });
 
-// PUT /api/users/change-password (current user changes own password)
+// PUT /api/users/change-password
 router.put('/change-password', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
     const { current_password, new_password } = req.body;
     if (!current_password || !new_password) return res.status(400).json({ error: 'Password lama dan baru wajib diisi.' });
     if (new_password.length < 6) return res.status(400).json({ error: 'Password baru minimal 6 karakter.' });
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const user = await queryOne('SELECT * FROM users WHERE id = ?', [req.user.id]);
     const valid = await bcrypt.compare(current_password, user.password_hash);
     if (!valid) return res.status(400).json({ error: 'Password lama tidak sesuai.' });
 
     const hash = await bcrypt.hash(new_password, 10);
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime("now") WHERE id = ?').run(hash, req.user.id);
-    db._save();
+    await execute('UPDATE users SET password_hash = ?, updated_at = NOW() WHERE id = ?', [hash, req.user.id]);
     logAudit(req.user.id, 'change_password', 'user', req.user.id);
     res.json({ message: 'Password berhasil diubah.' });
   } catch (err) {
@@ -121,55 +97,48 @@ router.put('/change-password', verifyToken, async (req, res) => {
 });
 
 // PUT /api/users/:id
-router.put('/:id', verifyToken, requireRole('admin'), (req, res) => {
+router.put('/:id', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
-
-    if (!existing) {
-      return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
-    }
+    const existing = await queryOne('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
 
     const { full_name, email, username, password, role } = req.body;
     const now = new Date().toISOString();
 
-    const transaction = db.transaction(() => {
+    const client = await getPool().connect();
+    try {
+      await client.query('BEGIN');
+
       let passwordHash = existing.password_hash;
       if (password) {
         if (password.length < 6) throw new Error('Password minimal 6 karakter.');
         passwordHash = bcrypt.hashSync(password, 10);
       }
 
-      db.prepare(`
-        UPDATE users SET full_name = ?, email = ?, username = ?, password_hash = ?, updated_at = ?
-        WHERE id = ?
-      `).run(
+      await client.query(convertParams('UPDATE users SET full_name = ?, email = ?, username = ?, password_hash = ?, updated_at = ? WHERE id = ?'), [
         full_name !== undefined ? full_name : existing.full_name,
         email !== undefined ? email : existing.email,
         username !== undefined ? username : existing.username,
-        passwordHash,
-        now,
-        req.params.id
-      );
+        passwordHash, now, req.params.id
+      ]);
 
-      // Update role if provided
       if (role) {
-        db.prepare('DELETE FROM user_roles WHERE user_id = ?').run(req.params.id);
-        const roleRecord = db.prepare('SELECT id FROM roles WHERE name = ?').get(role);
-        if (roleRecord) {
-          db.prepare('INSERT INTO user_roles (id, user_id, role_id) VALUES (?, ?, ?)').run(uuidv4(), req.params.id, roleRecord.id);
+        await client.query(convertParams('DELETE FROM user_roles WHERE user_id = ?'), [req.params.id]);
+        const { rows } = await client.query(convertParams('SELECT id FROM roles WHERE name = ?'), [role]);
+        if (rows[0]) {
+          await client.query(convertParams('INSERT INTO user_roles (id, user_id, role_id) VALUES (?, ?, ?)'), [uuidv4(), req.params.id, rows[0].id]);
         }
       }
-    });
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
 
-    transaction();
-
-    const user = db.prepare('SELECT id, full_name, email, username, status, created_at, updated_at FROM users WHERE id = ?').get(req.params.id);
-    const roles = db.prepare(`
-      SELECT r.name FROM roles r
-      JOIN user_roles ur ON ur.role_id = r.id
-      WHERE ur.user_id = ?
-    `).all(req.params.id).map(r => r.name);
+    const user = await queryOne('SELECT id, full_name, email, username, status, created_at, updated_at FROM users WHERE id = ?', [req.params.id]);
+    const roles = (await query('SELECT r.name FROM roles r JOIN user_roles ur ON ur.role_id = r.id WHERE ur.user_id = ?', [req.params.id])).map(r => r.name);
 
     res.json({ ...user, roles });
     logAudit(req.user?.id, 'update_user', 'user', req.params.id, { username: username || existing.username });
@@ -180,29 +149,16 @@ router.put('/:id', verifyToken, requireRole('admin'), (req, res) => {
 });
 
 // PUT /api/users/:id/status
-router.put('/:id/status', verifyToken, requireRole('admin'), (req, res) => {
+router.put('/:id/status', verifyToken, requireRole('admin'), async (req, res) => {
   try {
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
-
-    if (!existing) {
-      return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
-    }
+    const existing = await queryOne('SELECT * FROM users WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Pengguna tidak ditemukan.' });
 
     const { status } = req.body;
+    if (!['active', 'inactive'].includes(status)) return res.status(400).json({ error: 'Status harus "active" atau "inactive".' });
+    if (req.params.id === req.user.id && status === 'inactive') return res.status(400).json({ error: 'Tidak bisa menonaktifkan akun sendiri.' });
 
-    if (!['active', 'inactive'].includes(status)) {
-      return res.status(400).json({ error: 'Status harus "active" atau "inactive".' });
-    }
-
-    // Prevent deactivating self
-    if (req.params.id === req.user.id && status === 'inactive') {
-      return res.status(400).json({ error: 'Tidak bisa menonaktifkan akun sendiri.' });
-    }
-
-    db.prepare('UPDATE users SET status = ?, updated_at = ? WHERE id = ?')
-      .run(status, new Date().toISOString(), req.params.id);
-
+    await execute('UPDATE users SET status = ?, updated_at = ? WHERE id = ?', [status, new Date().toISOString(), req.params.id]);
     logAudit(req.user?.id, 'update_user_status', 'user', req.params.id, { status });
     res.json({ message: `Status pengguna berhasil diubah menjadi ${status}.` });
   } catch (err) {

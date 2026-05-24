@@ -1,21 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { getDb } = require('../db/database');
+const { query, queryOne, execute } = require('../db/database');
 const { verifyToken } = require('../middleware/auth');
 const { logAudit } = require('../middleware/auditLog');
 
 // GET /api/categories
-router.get('/', verifyToken, (req, res) => {
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const categories = db.prepare(`
+    const categories = await query(`
       SELECT c.*, COUNT(p.id) as product_count
       FROM categories c
       LEFT JOIN products p ON p.category_id = c.id AND p.is_active = 1
-      GROUP BY c.id
+      GROUP BY c.id, c.name, c.description
       ORDER BY c.name ASC
-    `).all();
+    `);
     res.json(categories);
   } catch (err) {
     console.error('List categories error:', err);
@@ -24,9 +23,8 @@ router.get('/', verifyToken, (req, res) => {
 });
 
 // POST /api/categories
-router.post('/', verifyToken, (req, res) => {
+router.post('/', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
     const { name, description } = req.body;
 
     if (!name) {
@@ -34,9 +32,9 @@ router.post('/', verifyToken, (req, res) => {
     }
 
     const id = uuidv4();
-    db.prepare('INSERT INTO categories (id, name, description) VALUES (?, ?, ?)').run(id, name, description || null);
+    await execute('INSERT INTO categories (id, name, description) VALUES (?, ?, ?)', [id, name, description || null]);
 
-    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+    const category = await queryOne('SELECT * FROM categories WHERE id = ?', [id]);
     logAudit(req.user?.id, 'create_category', 'category', id, { name });
     res.status(201).json(category);
   } catch (err) {
@@ -46,10 +44,9 @@ router.post('/', verifyToken, (req, res) => {
 });
 
 // PUT /api/categories/:id
-router.put('/:id', verifyToken, (req, res) => {
+router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+    const existing = await queryOne('SELECT * FROM categories WHERE id = ?', [req.params.id]);
 
     if (!existing) {
       return res.status(404).json({ error: 'Kategori tidak ditemukan.' });
@@ -61,9 +58,9 @@ router.put('/:id', verifyToken, (req, res) => {
       return res.status(400).json({ error: 'Nama kategori harus diisi.' });
     }
 
-    db.prepare('UPDATE categories SET name = ?, description = ? WHERE id = ?').run(name, description || null, req.params.id);
+    await execute('UPDATE categories SET name = ?, description = ? WHERE id = ?', [name, description || null, req.params.id]);
 
-    const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+    const category = await queryOne('SELECT * FROM categories WHERE id = ?', [req.params.id]);
     logAudit(req.user?.id, 'update_category', 'category', req.params.id, { name });
     res.json(category);
   } catch (err) {
@@ -73,22 +70,21 @@ router.put('/:id', verifyToken, (req, res) => {
 });
 
 // DELETE /api/categories/:id
-router.delete('/:id', verifyToken, (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+    const existing = await queryOne('SELECT * FROM categories WHERE id = ?', [req.params.id]);
 
     if (!existing) {
       return res.status(404).json({ error: 'Kategori tidak ditemukan.' });
     }
 
     // Check if products are using this category
-    const productCount = db.prepare('SELECT COUNT(*) as count FROM products WHERE category_id = ?').get(req.params.id);
+    const productCount = await queryOne('SELECT COUNT(*) as count FROM products WHERE category_id = ?', [req.params.id]);
     if (productCount.count > 0) {
       return res.status(409).json({ error: `Tidak dapat menghapus kategori. Masih digunakan oleh ${productCount.count} produk.` });
     }
 
-    db.prepare('DELETE FROM categories WHERE id = ?').run(req.params.id);
+    await execute('DELETE FROM categories WHERE id = ?', [req.params.id]);
     logAudit(req.user?.id, 'delete_category', 'category', req.params.id, { name: existing.name });
     res.json({ message: 'Kategori berhasil dihapus.' });
   } catch (err) {

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { initializeDatabase } = require('./db/database');
@@ -23,7 +24,9 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+  origin: process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : ['http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -39,7 +42,6 @@ app.use('/api/units', unitRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/purchase-orders', purchaseRoutes);
 app.use('/api/goods-receipts', (req, res, next) => {
-  // Forward to purchase routes which handles /goods-receipts
   req.url = '/goods-receipts' + req.url;
   purchaseRoutes(req, res, next);
 });

@@ -1,10 +1,10 @@
 const jwt = require('jsonwebtoken');
-const { getDb } = require('../db/database');
+const { queryOne, query } = require('../db/database');
 
-const JWT_SECRET = 'apotek-web-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET || 'apotek-web-secret-key-2024';
 const JWT_EXPIRES_IN = '24h';
 
-function verifyToken(req, res, next) {
+async function verifyToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader) {
     return res.status(401).json({ error: 'Token tidak ditemukan. Silakan login.' });
@@ -14,8 +14,7 @@ function verifyToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const db = getDb();
-    const user = db.prepare('SELECT u.id, u.full_name, u.email, u.username, u.status FROM users u WHERE u.id = ?').get(decoded.userId);
+    const user = await queryOne('SELECT u.id, u.full_name, u.email, u.username, u.status FROM users u WHERE u.id = ?', [decoded.userId]);
 
     if (!user) {
       return res.status(401).json({ error: 'User tidak ditemukan.' });
@@ -24,11 +23,11 @@ function verifyToken(req, res, next) {
       return res.status(403).json({ error: 'Akun tidak aktif.' });
     }
 
-    const roles = db.prepare(`
+    const roles = (await query(`
       SELECT r.name FROM roles r
       JOIN user_roles ur ON ur.role_id = r.id
       WHERE ur.user_id = ?
-    `).all(user.id).map(r => r.name);
+    `, [user.id])).map(r => r.name);
 
     req.user = { ...user, roles };
     next();
@@ -36,11 +35,15 @@ function verifyToken(req, res, next) {
     if (err.name === 'TokenExpiredError') {
       return res.status(401).json({ error: 'Token sudah expired. Silakan login kembali.' });
     }
-    return res.status(401).json({ error: 'Token tidak valid.' });
+    if (err.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: 'Token tidak valid.' });
+    }
+    console.error('Auth middleware error:', err);
+    return res.status(500).json({ error: 'Terjadi kesalahan autentikasi.' });
   }
 }
 
-function optionalAuth(req, res, next) {
+async function optionalAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader) {
     return next();
@@ -50,15 +53,14 @@ function optionalAuth(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    const db = getDb();
-    const user = db.prepare('SELECT u.id, u.full_name, u.email, u.username, u.status FROM users u WHERE u.id = ?').get(decoded.userId);
+    const user = await queryOne('SELECT u.id, u.full_name, u.email, u.username, u.status FROM users u WHERE u.id = ?', [decoded.userId]);
 
     if (user && user.status === 'active') {
-      const roles = db.prepare(`
+      const roles = (await query(`
         SELECT r.name FROM roles r
         JOIN user_roles ur ON ur.role_id = r.id
         WHERE ur.user_id = ?
-      `).all(user.id).map(r => r.name);
+      `, [user.id])).map(r => r.name);
       req.user = { ...user, roles };
     }
   } catch (err) {

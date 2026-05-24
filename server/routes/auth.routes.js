@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { getDb } = require('../db/database');
+const { queryOne, query, execute } = require('../db/database');
 const { verifyToken, JWT_SECRET, JWT_EXPIRES_IN } = require('../middleware/auth');
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
 
@@ -14,8 +14,7 @@ router.post('/login', (req, res) => {
       return res.status(400).json({ error: 'Username dan password harus diisi.' });
     }
 
-    const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = await queryOne('SELECT * FROM users WHERE username = ?', [username]);
 
     if (!user) {
       return res.status(401).json({ error: 'Username atau password salah.' });
@@ -31,14 +30,14 @@ router.post('/login', (req, res) => {
     }
 
     // Get roles
-    const roles = db.prepare(`
+    const roles = await query(`
       SELECT r.id, r.name FROM roles r
       JOIN user_roles ur ON ur.role_id = r.id
       WHERE ur.user_id = ?
-    `).all(user.id);
+    `, [user.id]);
 
     // Update last_login_at
-    db.prepare('UPDATE users SET last_login_at = datetime(\'now\') WHERE id = ?').run(user.id);
+    await execute('UPDATE users SET last_login_at = NOW() WHERE id = ?', [user.id]);
 
     const token = jwt.sign(
       { userId: user.id, username: user.username },
@@ -70,20 +69,19 @@ router.post('/logout', (req, res) => {
 });
 
 // GET /api/auth/me
-router.get('/me', verifyToken, (req, res) => {
+router.get('/me', verifyToken, async (req, res) => {
   try {
-    const db = getDb();
-    const user = db.prepare('SELECT id, full_name, email, username, status, last_login_at, created_at FROM users WHERE id = ?').get(req.user.id);
+    const user = await queryOne('SELECT id, full_name, email, username, status, last_login_at, created_at FROM users WHERE id = ?', [req.user.id]);
 
     if (!user) {
       return res.status(404).json({ error: 'User tidak ditemukan.' });
     }
 
-    const roles = db.prepare(`
+    const roles = await query(`
       SELECT r.id, r.name FROM roles r
       JOIN user_roles ur ON ur.role_id = r.id
       WHERE ur.user_id = ?
-    `).all(user.id);
+    `, [user.id]);
 
     res.json({
       ...user,
